@@ -62,13 +62,6 @@
     color: #ffffff;
 }
 
-.agent-island-overlay-title {
-    font-size: 8.5pt;
-    font-weight: bold;
-    color: #9aa5ce;
-    margin-bottom: 4px;
-}
-
 .agent-island-row {
     padding: 6px 2px;
     spacing: 12px;
@@ -119,6 +112,41 @@
     height: 1px;
     background-color: rgba(255, 255, 255, 0.08);
     margin: 6px 0px;
+}
+
+/* ---- view switcher chips (the NotchNook "Nook | Tray" pattern) ---- */
+
+.agent-island-tabs {
+    spacing: 6px;
+    padding: 2px 0px 6px 0px;
+}
+
+.agent-island-tab {
+    border-radius: 99px;
+    padding: 3px 12px;
+    font-size: 8.5pt;
+    color: #9aa5ce;
+}
+
+.agent-island-tab:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.agent-island-tab-active {
+    background-color: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    font-weight: bold;
+}
+
+.agent-island-idle-toggle {
+    border-radius: 10px;
+    padding: 6px;
+    font-size: 9pt;
+    color: #9aa5ce;
+}
+
+.agent-island-idle-toggle:hover {
+    background-color: rgba(255, 255, 255, 0.06);
 }
 
 /* ---- notification rows ---- */

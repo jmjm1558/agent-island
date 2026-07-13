@@ -18,6 +18,7 @@ import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
@@ -58,6 +59,8 @@ class Island extends PanelMenu.Button {
         this._overlay = null;
         this._grab = null;
         this._stagePressHandler = 0;
+        this._view = 'sessions';   // which card view is active
+        this._showIdle = false;    // idle sessions expanded in the list?
 
         this._pill = new St.BoxLayout({
             style_class: 'agent-island-pill',
@@ -183,6 +186,7 @@ class Island extends PanelMenu.Button {
         if (this._overlay)
             return;
 
+        this._showIdle = false;
         this._overlay = new St.BoxLayout({
             style_class: 'agent-island-overlay',
             vertical: true,
@@ -301,44 +305,100 @@ class Island extends PanelMenu.Button {
                 new St.Widget({style_class: 'agent-island-separator'}));
         }
 
-        this._overlay.add_child(new St.Label({
-            style_class: 'agent-island-overlay-title',
-            text: 'Agent sessions',
-        }));
-
-        const sessions = this._store.sessions;
-        if (sessions.length === 0) {
-            this._overlay.add_child(new St.Label({
-                style_class: 'agent-island-row-sub',
-                text: 'No active agent sessions',
-            }));
-        }
-
-        for (const session of sessions)
-            this._overlay.add_child(this._makeRow(session));
-
-        const notifications = this._notifications.notifications;
-        if (notifications.length > 0) {
-            this._overlay.add_child(
-                new St.Widget({style_class: 'agent-island-separator'}));
-            this._overlay.add_child(new St.Label({
-                style_class: 'agent-island-overlay-title',
-                text: 'Notifications',
-            }));
-            for (const notification of notifications)
-                this._overlay.add_child(this._makeNotificationRow(notification));
-        }
+        // One view at a time, switched with small chips (the NotchNook
+        // "Nook | Tray" pattern) instead of stacking everything.
+        this._overlay.add_child(this._makeViewSwitcher());
+        if (this._view === 'sessions')
+            this._fillSessionsView();
+        else
+            this._fillNotificationsView();
 
         // Content changed => size may have changed => re-center.
         if (this._overlay.get_parent())
             this._positionOverlay();
     }
 
+    _makeViewSwitcher() {
+        const tabs = new St.BoxLayout({style_class: 'agent-island-tabs'});
+
+        const addTab = (id, label) => {
+            const active = this._view === id;
+            const tab = new St.Button({
+                style_class: active
+                    ? 'agent-island-tab agent-island-tab-active'
+                    : 'agent-island-tab',
+                label,
+            });
+            tab.connect('clicked', () => {
+                this._view = id;
+                this._fillOverlay();
+            });
+            tabs.add_child(tab);
+        };
+
+        const sessions = this._store.sessions.length;
+        const alerts = this._notifications.notifications.length;
+        addTab('sessions', sessions > 0 ? `Sessions ${sessions}` : 'Sessions');
+        addTab('alerts', alerts > 0 ? `Alerts ${alerts}` : 'Alerts');
+
+        return tabs;
+    }
+
+    _fillSessionsView() {
+        const sessions = this._store.sessions;
+        if (sessions.length === 0) {
+            this._overlay.add_child(new St.Label({
+                style_class: 'agent-island-row-sub',
+                text: 'No active agent sessions',
+            }));
+            return;
+        }
+
+        // Busy sessions always show; idle ones fold into one quiet line.
+        const busy = sessions.filter(s => s.state !== 'idle');
+        const idle = sessions.filter(s => s.state === 'idle');
+
+        for (const session of busy)
+            this._overlay.add_child(this._makeRow(session));
+
+        if (idle.length > 0 && (this._showIdle || busy.length === 0)) {
+            for (const session of idle)
+                this._overlay.add_child(this._makeRow(session));
+        } else if (idle.length > 0) {
+            const toggle = new St.Button({
+                style_class: 'agent-island-idle-toggle',
+                label: `${idle.length} idle session${idle.length > 1 ? 's' : ''}`,
+            });
+            toggle.connect('clicked', () => {
+                this._showIdle = true;
+                this._fillOverlay();
+            });
+            this._overlay.add_child(toggle);
+        }
+    }
+
+    _fillNotificationsView() {
+        const notifications = this._notifications.notifications;
+        if (notifications.length === 0) {
+            this._overlay.add_child(new St.Label({
+                style_class: 'agent-island-row-sub',
+                text: 'No recent notifications',
+            }));
+            return;
+        }
+        for (const notification of notifications)
+            this._overlay.add_child(this._makeNotificationRow(notification));
+    }
+
     // [app icon] [title + one line of body]                        [time]
     // Clicking a notification activates it (opens the app), same as
     // clicking it in the Shell's own notification list.
     _makeNotificationRow(notification) {
-        const row = new St.BoxLayout({style_class: 'agent-island-notif'});
+        const row = new St.BoxLayout({
+            style_class: 'agent-island-notif',
+            x_expand: true,
+            x_align: Clutter.ActorAlign.FILL,
+        });
 
         row.add_child(new St.Icon({
             style_class: 'agent-island-notif-icon',
@@ -451,14 +511,21 @@ class Island extends PanelMenu.Button {
     }
 
     // One session = one row, iPhone-island style:
-    // [avatar square] [title + subtitle]                    [state chip]
+    // [avatar square] [what it is doing + where]            [state chip]
+    // Clicking the row focuses the window working on that directory.
     _makeRow(session) {
         const meta = AGENT_META[session.agent] ?? {
             label: session.agent,
             initial: (session.agent[0] ?? '?').toUpperCase(),
         };
 
-        const row = new St.BoxLayout({style_class: 'agent-island-row'});
+        // x_expand + FILL: the wrapping St.Button centers its child by
+        // default, which looks broken for short rows.
+        const row = new St.BoxLayout({
+            style_class: 'agent-island-row',
+            x_expand: true,
+            x_align: Clutter.ActorAlign.FILL,
+        });
 
         // The "album art": a rounded square with the agent's initial.
         const avatar = new St.Bin({
@@ -479,15 +546,20 @@ class Island extends PanelMenu.Button {
             x_expand: true,
             y_align: Clutter.ActorAlign.CENTER,
         });
-        const title = session.title ||
-            GLib.path_get_basename(session.cwd || '') || meta.label;
+        const project = GLib.path_get_basename(session.cwd || '');
+        // Headline: what the session is doing - the last prompt if the
+        // hook captured one, else the session title, else the project.
+        const headline = session.task || session.title ||
+            project || meta.label;
         text.add_child(new St.Label({
             style_class: 'agent-island-row-title',
-            text: title,
+            text: headline.length > 48
+                ? `${headline.slice(0, 48)}…` : headline,
         }));
         text.add_child(new St.Label({
             style_class: 'agent-island-row-sub',
-            text: `${meta.label} · ${timeAgo(session.ts)}`,
+            text: [project, meta.label, timeAgo(session.ts)]
+                .filter(part => part).join(' · '),
         }));
         row.add_child(text);
 
@@ -507,7 +579,33 @@ class Island extends PanelMenu.Button {
         }));
         row.add_child(chip);
 
-        return row;
+        const button = new St.Button({
+            style_class: 'agent-island-notif-btn',
+            child: row,
+            x_expand: true,
+        });
+        button.connect('clicked', () => {
+            this._collapse();
+            this._focusSessionWindow(session);
+        });
+        return button;
+    }
+
+    // Best effort "take me to that session": VS Code, terminals and most
+    // editors put the working directory's name in their window title, so
+    // focus the most recently used window that mentions it.
+    _focusSessionWindow(session) {
+        const project =
+            GLib.path_get_basename(session.cwd || '').toLowerCase();
+        if (!project)
+            return;
+
+        const windows =
+            global.display.get_tab_list(Meta.TabList.NORMAL, null);
+        const match = windows.find(window =>
+            (window.get_title() ?? '').toLowerCase().includes(project));
+        if (match)
+            Main.activateWindow(match);
     }
 
     // True notch: the card starts at the very top edge of the screen and

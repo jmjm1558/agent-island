@@ -30,13 +30,25 @@ main() {
 
     file="$dir/${agent}-${session_id}.json"
 
+    # Title and task survive across events: read what we stored before.
+    title=$(jq -r '.title // empty' "$file" 2>/dev/null)
+    task=$(jq -r '.task // empty' "$file" 2>/dev/null)
+
     # Event -> island state. Anything not listed is ignored on purpose.
     case "$event" in
         SessionEnd)
             rm -f "$file"
             return 0
             ;;
-        UserPromptSubmit|PreToolUse|PostToolUse)
+        UserPromptSubmit)
+            state="working"
+            # The prompt is the best one-line answer to "what is this
+            # session doing?" - keep the first 100 chars.
+            new_task=$(jq -r '.prompt // empty' <<<"$input" 2>/dev/null |
+                tr '\n' ' ' | cut -c1-100)
+            [ -n "$new_task" ] && task="$new_task"
+            ;;
+        PreToolUse|PostToolUse)
             state="working"
             ;;
         PermissionRequest)
@@ -51,7 +63,12 @@ main() {
                     return 0 ;;
             esac
             ;;
-        SessionStart|Stop|StopFailure)
+        SessionStart)
+            state="idle"
+            new_title=$(jq -r '.session_title // empty' <<<"$input" 2>/dev/null)
+            [ -n "$new_title" ] && title="$new_title"
+            ;;
+        Stop|StopFailure)
             state="idle"
             ;;
         *)
@@ -67,8 +84,11 @@ main() {
         --arg agent "$agent" \
         --arg state "$state" \
         --arg cwd "$cwd" \
+        --arg title "$title" \
+        --arg task "$task" \
         --argjson ts "$(date +%s)" \
-        '{agent: $agent, state: $state, cwd: $cwd, ts: $ts}' >"$tmp" &&
+        '{agent: $agent, state: $state, cwd: $cwd, title: $title,
+          task: $task, ts: $ts}' >"$tmp" &&
         mv -f "$tmp" "$file"
     rm -f "$tmp" 2>/dev/null
     return 0

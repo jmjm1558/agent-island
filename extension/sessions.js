@@ -25,8 +25,11 @@ export const STATE_DIR =
 const VALID_STATES = ['working', 'waiting', 'idle'];
 
 // A session whose file has not been touched in this long is treated as dead
-// (e.g. the agent was killed and its SessionEnd hook never ran).
+// (e.g. the agent was killed and its SessionEnd hook never ran). Idle
+// sessions expire much sooner: hours-old idle entries are almost always
+// terminals or editor tabs that were closed without a SessionEnd.
 const STALE_AFTER_SECONDS = 6 * 60 * 60;
+const IDLE_STALE_AFTER_SECONDS = 2 * 60 * 60;
 
 Gio._promisify(Gio.File.prototype, 'load_contents_async');
 
@@ -64,7 +67,8 @@ export class SessionStore extends Signals.EventEmitter {
     get sessions() {
         const now = GLib.get_real_time() / 1e6;
         return [...this._sessions.values()]
-            .filter(s => now - s.ts < STALE_AFTER_SECONDS)
+            .filter(s => now - s.ts < (s.state === 'idle'
+                ? IDLE_STALE_AFTER_SECONDS : STALE_AFTER_SECONDS))
             .sort((a, b) => b.ts - a.ts);
     }
 
@@ -121,6 +125,7 @@ export class SessionStore extends Signals.EventEmitter {
             state: VALID_STATES.includes(raw.state) ? raw.state : 'idle',
             cwd: typeof raw.cwd === 'string' ? raw.cwd : '',
             title: typeof raw.title === 'string' ? raw.title : '',
+            task: typeof raw.task === 'string' ? raw.task : '',
             ts: Number.isFinite(raw.ts) ? raw.ts : GLib.get_real_time() / 1e6,
         };
     }
