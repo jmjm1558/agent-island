@@ -17,6 +17,12 @@ Collapsed, it is one dot per session, colored by state:
 | 🟠 amber | `waiting` | **the agent needs you** (permission, input) |
 | ⚪ gray | `idle` | finished, waiting for your next prompt |
 
+The expanded card is a notch hub, not just an agent list: when something is
+playing (Spotify, a browser, mpv - anything speaking MPRIS) a now-playing
+row with cover art, track info and prev/play/next controls appears above
+the sessions, and the pill shows a small note. If you run another music
+pill extension you will see music twice; disable one.
+
 The clock is moved to the left side of the bar so the island can live in the
 center. Disabling the extension puts everything back.
 
@@ -109,6 +115,7 @@ private D-Bus) with Agent Island enabled. Useful extras:
 extension/            the GNOME Shell extension (what gets symlinked)
   extension.js        entry point: enable/disable + clock relocation
   sessions.js         SessionStore: watches the state dir, no polling
+  media.js            MediaWatcher: MPRIS players via the Shell's own wrapper
   island.js           the pill + the expandable card
   stylesheet.css      all the looks (iPhone-style black, big radii)
 hooks/
@@ -122,8 +129,7 @@ install.sh            symlink + optional hook registration (idempotent)
 
 ## Roadmap
 
-- [ ] Media module in the expanded card (MPRIS: art, title, controls) so the
-      island covers what a music pill does
+- [x] Media module in the expanded card (MPRIS: art, title, controls)
 - [ ] Notification peek: recent notifications inside the card
 - [ ] Live-activity chips inline in the pill (e.g. "needs input" text, not
       just a dot)
