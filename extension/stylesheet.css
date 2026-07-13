@@ -36,10 +36,13 @@
 
 /* ---- expanded card (floats below the bar) ---- */
 
+/* Fused with the bar, macOS-notch style: square top corners, no top
+ * border, and the extension positions it flush against the panel. */
 .agent-island-overlay {
     background-color: rgba(0, 0, 0, 0.92);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 26px;
+    border-top-width: 0px;
+    border-radius: 0 0 26px 26px;
     padding: 16px 18px;
     min-width: 380px;
     spacing: 6px;

@@ -339,12 +339,20 @@ class Island extends PanelMenu.Button {
         return row;
     }
 
+    // The card hangs from the bar, macOS-notch style: flush against the
+    // panel's bottom edge (no gap; the CSS squares the top corners) and
+    // centered under the pill, so it reads as the pill growing open.
     _positionOverlay() {
         const monitor = Main.layoutManager.primaryMonitor;
         const [, width] = this._overlay.get_preferred_width(-1);
-        const x = monitor.x + Math.round((monitor.width - width) / 2);
-        const y = monitor.y + Main.panel.height + 8;
-        this._overlay.set_position(x, y);
+
+        const [pillX] = this.get_transformed_position();
+        const [pillWidth] = this.get_transformed_size();
+        let x = Math.round(pillX + pillWidth / 2 - width / 2);
+        x = Math.max(monitor.x,
+            Math.min(x, monitor.x + monitor.width - width));
+
+        this._overlay.set_position(x, monitor.y + Main.panel.height);
     }
 
     // Is the stage point (x, y) inside this actor?
