@@ -17,6 +17,7 @@
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -52,6 +53,7 @@ class Island extends PanelMenu.Button {
 
         this._store = store;
         this._overlay = null;
+        this._grab = null;
         this._stagePressHandler = 0;
 
         this._pill = new St.BoxLayout({
@@ -190,9 +192,18 @@ class Island extends PanelMenu.Button {
         });
         this._overlay.grab_key_focus();
 
-        // Close when clicking anywhere else in the Shell's UI. (Clicks that
-        // land inside application windows never reach the Shell stage, so
-        // those cannot dismiss the overlay - known Wayland limitation.)
+        // Grab input like GNOME's own menus do. While the grab is held,
+        // every click in the session is routed through the Shell stage, so
+        // clicking anywhere - even inside an app window - can dismiss the
+        // island. Without the grab (another menu holds it), clicks over
+        // windows never reach the Shell: that was the "stays open" bug.
+        this._grab = Main.pushModal(this._overlay,
+            {actionMode: Shell.ActionMode.POPUP});
+        if ((this._grab.get_seat_state() & Clutter.GrabState.POINTER) === 0) {
+            Main.popModal(this._grab);
+            this._grab = null;
+        }
+
         this._stagePressHandler = global.stage.connect('captured-event',
             (_stage, event) => {
                 const type = event.type();
@@ -201,9 +212,20 @@ class Island extends PanelMenu.Button {
                     return Clutter.EVENT_PROPAGATE;
 
                 const [x, y] = event.get_coords();
-                if (!this._contains(this._overlay, x, y) &&
-                    !this._contains(this, x, y))
+                const insideOverlay = this._contains(this._overlay, x, y);
+
+                if (this._grab) {
+                    // Menu semantics: the first click outside only closes
+                    // the island (including a click on the pill itself).
+                    if (!insideOverlay) {
+                        this._collapse();
+                        return Clutter.EVENT_STOP;
+                    }
+                } else if (!insideOverlay && !this._contains(this, x, y)) {
+                    // Grab-less fallback: close on Shell-chrome clicks, but
+                    // let the pill's own handler do the toggling.
                     this._collapse();
+                }
 
                 return Clutter.EVENT_PROPAGATE;
             });
@@ -213,6 +235,10 @@ class Island extends PanelMenu.Button {
         if (!this._overlay)
             return;
 
+        if (this._grab) {
+            Main.popModal(this._grab);
+            this._grab = null;
+        }
         if (this._stagePressHandler) {
             global.stage.disconnect(this._stagePressHandler);
             this._stagePressHandler = 0;
@@ -332,6 +358,10 @@ class Island extends PanelMenu.Button {
         if (this._autoExpandId) {
             GLib.source_remove(this._autoExpandId);
             this._autoExpandId = 0;
+        }
+        if (this._grab) {
+            Main.popModal(this._grab);
+            this._grab = null;
         }
         if (this._stagePressHandler) {
             global.stage.disconnect(this._stagePressHandler);
