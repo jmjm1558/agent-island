@@ -17,13 +17,15 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {SessionStore} from './sessions.js';
+import {MediaWatcher} from './media.js';
 import {Island} from './island.js';
 
 export default class AgentIslandExtension extends Extension {
     enable() {
         this._store = new SessionStore();
+        this._media = new MediaWatcher();
 
-        this._island = new Island(this._store);
+        this._island = new Island(this._store, this._media);
         // 'agentIsland' is our role name in the panel's status area.
         // Position 0 in the 'center' box = leftmost slot of the center.
         Main.panel.addToStatusArea('agentIsland', this._island, 0, 'center');
@@ -36,6 +38,9 @@ export default class AgentIslandExtension extends Extension {
 
         this._island?.destroy();
         this._island = null;
+
+        this._media?.destroy();
+        this._media = null;
 
         this._store?.destroy();
         this._store = null;

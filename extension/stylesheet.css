@@ -34,6 +34,11 @@
     color: #9aa5ce;
 }
 
+.agent-island-pill-music {
+    icon-size: 11px;
+    color: #bb9af7;
+}
+
 /* ---- expanded card (floats below the bar) ---- */
 
 /* Fused with the bar, macOS-notch style: square top corners, no top
@@ -59,6 +64,53 @@
 .agent-island-row {
     padding: 6px 2px;
     spacing: 12px;
+}
+
+/* ---- media row (NotchNook style: art, track, controls) ---- */
+
+.agent-island-media {
+    padding: 4px 2px;
+    spacing: 12px;
+}
+
+.agent-island-cover-btn {
+    border-radius: 12px;
+    padding: 0px;
+}
+
+.agent-island-cover {
+    icon-size: 48px;
+    border-radius: 12px;
+}
+
+.agent-island-media-title {
+    font-size: 11.5pt;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.agent-island-media-controls {
+    spacing: 2px;
+}
+
+.agent-island-media-btn {
+    border-radius: 99px;
+    padding: 8px;
+}
+
+.agent-island-media-btn:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+.agent-island-media-btn-icon {
+    icon-size: 16px;
+    color: #ffffff;
+}
+
+.agent-island-separator {
+    height: 1px;
+    background-color: rgba(255, 255, 255, 0.08);
+    margin: 6px 0px;
 }
 
 /* The "album art" square: agent initial on a colored rounded square. */

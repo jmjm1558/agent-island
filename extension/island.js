@@ -15,6 +15,7 @@
 // because Mutter does not implement the wlr-layer-shell protocol.
 
 import Clutter from 'gi://Clutter';
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
@@ -46,12 +47,13 @@ const AGENT_META = {
 
 export const Island = GObject.registerClass(
 class Island extends PanelMenu.Button {
-    _init(store) {
+    _init(store, media) {
         // '0.0, name, true': the `true` tells PanelMenu.Button NOT to create
         // its usual dropdown menu - we manage our own overlay instead.
         super._init(0.0, 'Agent Island', true);
 
         this._store = store;
+        this._media = media;
         this._overlay = null;
         this._grab = null;
         this._stagePressHandler = 0;
@@ -63,8 +65,9 @@ class Island extends PanelMenu.Button {
         this.add_child(this._pill);
 
         // connectObject ties the signal's lifetime to `this`: when the
-        // island actor is destroyed the handler is disconnected for us.
+        // island actor is destroyed the handlers are disconnected for us.
         this._store.connectObject('changed', () => this._sync(), this);
+        this._media.connectObject('changed', () => this._sync(), this);
         this.connect('destroy', () => this._onIslandDestroyed());
 
         this._sync();
@@ -104,8 +107,17 @@ class Island extends PanelMenu.Button {
     _sync() {
         this._pill.destroy_all_children();
 
+        // Something is playing: hint it in the pill, NotchNook style.
+        if (this._media.player?.status === 'Playing') {
+            this._pill.add_child(new St.Icon({
+                style_class: 'agent-island-pill-music',
+                icon_name: 'audio-x-generic-symbolic',
+                y_align: Clutter.ActorAlign.CENTER,
+            }));
+        }
+
         const sessions = this._store.sessions;
-        if (sessions.length === 0) {
+        if (sessions.length === 0 && this._pill.get_n_children() === 0) {
             this._pill.add_child(this._makeDot('empty'));
         } else {
             for (const session of sessions.slice(0, 4)) {
@@ -258,6 +270,14 @@ class Island extends PanelMenu.Button {
     _fillOverlay() {
         this._overlay.destroy_all_children();
 
+        // Media first, like the macOS notch apps: art, track, controls.
+        const player = this._media.player;
+        if (player) {
+            this._overlay.add_child(this._makeMediaRow(player));
+            this._overlay.add_child(
+                new St.Widget({style_class: 'agent-island-separator'}));
+        }
+
         this._overlay.add_child(new St.Label({
             style_class: 'agent-island-overlay-title',
             text: 'Agent sessions',
@@ -277,6 +297,74 @@ class Island extends PanelMenu.Button {
         // Content changed => size may have changed => re-center.
         if (this._overlay.get_parent())
             this._positionOverlay();
+    }
+
+    // [cover art] [track title + artists]        [prev] [play/pause] [next]
+    _makeMediaRow(player) {
+        const row = new St.BoxLayout({style_class: 'agent-island-media'});
+
+        // Cover art doubles as the "open the player app" button.
+        const cover = new St.Button({
+            style_class: 'agent-island-cover-btn',
+            y_align: Clutter.ActorAlign.CENTER,
+            child: new St.Icon({
+                style_class: 'agent-island-cover',
+                gicon: player.trackCoverUrl
+                    ? new Gio.FileIcon({
+                        file: Gio.File.new_for_uri(player.trackCoverUrl),
+                    })
+                    : new Gio.ThemedIcon({name: 'audio-x-generic-symbolic'}),
+            }),
+        });
+        cover.connect('clicked', () => {
+            player.raise();
+            this._collapse();
+        });
+        row.add_child(cover);
+
+        const text = new St.BoxLayout({
+            style_class: 'agent-island-row-text',
+            vertical: true,
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        text.add_child(new St.Label({
+            style_class: 'agent-island-media-title',
+            text: player.trackTitle,
+        }));
+        text.add_child(new St.Label({
+            style_class: 'agent-island-row-sub',
+            text: player.trackArtists.join(', '),
+        }));
+        row.add_child(text);
+
+        const controls = new St.BoxLayout({
+            style_class: 'agent-island-media-controls',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        const addControl = (iconName, sensitive, onClick) => {
+            const button = new St.Button({
+                style_class: 'agent-island-media-btn',
+                reactive: sensitive,
+                child: new St.Icon({
+                    style_class: 'agent-island-media-btn-icon',
+                    icon_name: iconName,
+                }),
+            });
+            button.connect('clicked', onClick);
+            controls.add_child(button);
+        };
+        addControl('media-skip-backward-symbolic',
+            player.canGoPrevious, () => player.previous());
+        addControl(player.status === 'Playing'
+            ? 'media-playback-pause-symbolic'
+            : 'media-playback-start-symbolic',
+        true, () => player.playPause());
+        addControl('media-skip-forward-symbolic',
+            player.canGoNext, () => player.next());
+        row.add_child(controls);
+
+        return row;
     }
 
     // One session = one row, iPhone-island style:
@@ -382,6 +470,7 @@ class Island extends PanelMenu.Button {
             this._overlay = null;
         }
         this._store = null;
+        this._media = null;
     }
 });
 
