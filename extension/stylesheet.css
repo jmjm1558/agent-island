@@ -39,6 +39,12 @@
     color: #bb9af7;
 }
 
+.agent-island-pill-notif {
+    font-size: 8pt;
+    font-weight: bold;
+    color: #e0af68;
+}
+
 /* ---- expanded card (floats below the bar) ---- */
 
 /* Fused with the bar, macOS-notch style: solid black (it covers its slice
@@ -113,6 +119,36 @@
     height: 1px;
     background-color: rgba(255, 255, 255, 0.08);
     margin: 6px 0px;
+}
+
+/* ---- notification rows ---- */
+
+.agent-island-notif-btn {
+    border-radius: 12px;
+}
+
+.agent-island-notif-btn:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.agent-island-notif {
+    padding: 5px 4px;
+    spacing: 10px;
+}
+
+.agent-island-notif-icon {
+    icon-size: 22px;
+}
+
+.agent-island-notif-title {
+    font-size: 10.5pt;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.agent-island-notif-time {
+    font-size: 8pt;
+    color: #565f89;
 }
 
 /* The "album art" square: agent initial on a colored rounded square. */

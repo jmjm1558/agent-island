@@ -47,13 +47,14 @@ const AGENT_META = {
 
 export const Island = GObject.registerClass(
 class Island extends PanelMenu.Button {
-    _init(store, media) {
+    _init(store, media, notifications) {
         // '0.0, name, true': the `true` tells PanelMenu.Button NOT to create
         // its usual dropdown menu - we manage our own overlay instead.
         super._init(0.0, 'Agent Island', true);
 
         this._store = store;
         this._media = media;
+        this._notifications = notifications;
         this._overlay = null;
         this._grab = null;
         this._stagePressHandler = 0;
@@ -68,6 +69,7 @@ class Island extends PanelMenu.Button {
         // island actor is destroyed the handlers are disconnected for us.
         this._store.connectObject('changed', () => this._sync(), this);
         this._media.connectObject('changed', () => this._sync(), this);
+        this._notifications.connectObject('changed', () => this._sync(), this);
         this.connect('destroy', () => this._onIslandDestroyed());
 
         this._sync();
@@ -112,6 +114,16 @@ class Island extends PanelMenu.Button {
             this._pill.add_child(new St.Icon({
                 style_class: 'agent-island-pill-music',
                 icon_name: 'audio-x-generic-symbolic',
+                y_align: Clutter.ActorAlign.CENTER,
+            }));
+        }
+
+        // Unseen notifications: a small amber count.
+        const notificationCount = this._notifications.notifications.length;
+        if (notificationCount > 0) {
+            this._pill.add_child(new St.Label({
+                style_class: 'agent-island-pill-notif',
+                text: `${notificationCount}`,
                 y_align: Clutter.ActorAlign.CENTER,
             }));
         }
@@ -305,9 +317,69 @@ class Island extends PanelMenu.Button {
         for (const session of sessions)
             this._overlay.add_child(this._makeRow(session));
 
+        const notifications = this._notifications.notifications;
+        if (notifications.length > 0) {
+            this._overlay.add_child(
+                new St.Widget({style_class: 'agent-island-separator'}));
+            this._overlay.add_child(new St.Label({
+                style_class: 'agent-island-overlay-title',
+                text: 'Notifications',
+            }));
+            for (const notification of notifications)
+                this._overlay.add_child(this._makeNotificationRow(notification));
+        }
+
         // Content changed => size may have changed => re-center.
         if (this._overlay.get_parent())
             this._positionOverlay();
+    }
+
+    // [app icon] [title + one line of body]                        [time]
+    // Clicking a notification activates it (opens the app), same as
+    // clicking it in the Shell's own notification list.
+    _makeNotificationRow(notification) {
+        const row = new St.BoxLayout({style_class: 'agent-island-notif'});
+
+        row.add_child(new St.Icon({
+            style_class: 'agent-island-notif-icon',
+            gicon: notification.gicon,
+            fallback_icon_name: 'dialog-information-symbolic',
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
+
+        const text = new St.BoxLayout({
+            style_class: 'agent-island-row-text',
+            vertical: true,
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        text.add_child(new St.Label({
+            style_class: 'agent-island-notif-title',
+            text: notification.title ?? '',
+        }));
+        const body = (notification.body ?? '').split('\n')[0];
+        text.add_child(new St.Label({
+            style_class: 'agent-island-row-sub',
+            text: body.length > 70 ? `${body.slice(0, 70)}…` : body,
+        }));
+        row.add_child(text);
+
+        row.add_child(new St.Label({
+            style_class: 'agent-island-notif-time',
+            text: timeAgo(notification.datetime.to_unix()),
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
+
+        const button = new St.Button({
+            style_class: 'agent-island-notif-btn',
+            child: row,
+            x_expand: true,
+        });
+        button.connect('clicked', () => {
+            this._collapse();
+            notification.activate();
+        });
+        return button;
     }
 
     // [cover art] [track title + artists]        [prev] [play/pause] [next]
@@ -478,6 +550,7 @@ class Island extends PanelMenu.Button {
         }
         this._store = null;
         this._media = null;
+        this._notifications = null;
     }
 });
 
