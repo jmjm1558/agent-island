@@ -17,11 +17,17 @@ Collapsed, it is one dot per session, colored by state:
 | 🟠 amber | `waiting` | **the agent needs you** (permission, input) |
 | ⚪ gray | `idle` | finished, waiting for your next prompt |
 
-The expanded card is a notch hub, not just an agent list: when something is
-playing (Spotify, a browser, mpv - anything speaking MPRIS) a now-playing
-row with cover art, track info and prev/play/next controls appears above
-the sessions, and the pill shows a small note. If you run another music
-pill extension you will see music twice; disable one.
+The expanded card is a notch hub, not just an agent list:
+
+- **Now playing** (MPRIS: Spotify, browsers, mpv...): cover art, track info
+  and prev/play/next controls above the sessions; the pill shows a small
+  note while something plays. If you run another music pill extension you
+  will see music twice; disable one.
+- **Notifications**: the most recent desktop notifications (Telegram,
+  WhatsApp/YouTube/mail via their apps or browser) below the sessions, with
+  app icon, message preview and age; click one to open it. The pill shows
+  an amber count while any are present. The island only mirrors the Shell's
+  message tray - it never swallows or dismisses anything.
 
 The clock is moved to the left side of the bar so the island can live in the
 center. Disabling the extension puts everything back.
@@ -116,6 +122,7 @@ extension/            the GNOME Shell extension (what gets symlinked)
   extension.js        entry point: enable/disable + clock relocation
   sessions.js         SessionStore: watches the state dir, no polling
   media.js            MediaWatcher: MPRIS players via the Shell's own wrapper
+  notifications.js    NotificationWatcher: mirrors the Shell's message tray
   island.js           the pill + the expandable card
   stylesheet.css      all the looks (iPhone-style black, big radii)
 hooks/
@@ -130,7 +137,7 @@ install.sh            symlink + optional hook registration (idempotent)
 ## Roadmap
 
 - [x] Media module in the expanded card (MPRIS: art, title, controls)
-- [ ] Notification peek: recent notifications inside the card
+- [x] Notification peek: recent notifications inside the card
 - [ ] Live-activity chips inline in the pill (e.g. "needs input" text, not
       just a dot)
 - [ ] More agents (Gemini CLI, Aider) — contributions welcome, it is one
