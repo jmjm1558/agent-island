@@ -195,52 +195,63 @@ class Island extends PanelMenu.Button {
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         });
 
-        this._overlay.connect('key-press-event', (_actor, event) => {
-            if (event.get_key_symbol() === Clutter.KEY_Escape) {
-                this._collapse();
-                return Clutter.EVENT_STOP;
-            }
-            return Clutter.EVENT_PROPAGATE;
-        });
         this._overlay.grab_key_focus();
 
         // Grab input like GNOME's own menus do. While the grab is held,
-        // every click in the session is routed through the Shell stage, so
-        // clicking anywhere - even inside an app window - can dismiss the
-        // island. Without the grab (another menu holds it), clicks over
-        // windows never reach the Shell: that was the "stays open" bug.
+        // every event in the session is routed through the grabbed actor's
+        // chain, so clicking anywhere - even inside an app window - can
+        // dismiss the island.
         this._grab = Main.pushModal(this._overlay,
             {actionMode: Shell.ActionMode.POPUP});
-        if ((this._grab.get_seat_state() & Clutter.GrabState.POINTER) === 0) {
+        if (this._grab.get_seat_state() !== Clutter.GrabState.ALL) {
             Main.popModal(this._grab);
             this._grab = null;
         }
 
-        this._stagePressHandler = global.stage.connect('captured-event',
-            (_stage, event) => {
-                const type = event.type();
-                if (type !== Clutter.EventType.BUTTON_PRESS &&
-                    type !== Clutter.EventType.TOUCH_BEGIN)
-                    return Clutter.EVENT_PROPAGATE;
+        // Dismissal, straight from the Shell's GrabHelper playbook: while a
+        // Clutter grab is active the STAGE never sees events (they are
+        // retargeted to the grabbed actor), so listen on the overlay itself
+        // and ask get_event_actor() where the click really landed.
+        this._overlay.connect('captured-event', (_actor, event) => {
+            const type = event.type();
 
-                const [x, y] = event.get_coords();
-                const insideOverlay = this._contains(this._overlay, x, y);
+            if (type === Clutter.EventType.KEY_PRESS &&
+                event.get_key_symbol() === Clutter.KEY_Escape) {
+                this._collapse();
+                return Clutter.EVENT_STOP;
+            }
 
-                if (this._grab) {
-                    // Menu semantics: the first click outside only closes
-                    // the island (including a click on the pill itself).
-                    if (!insideOverlay) {
-                        this._collapse();
-                        return Clutter.EVENT_STOP;
-                    }
-                } else if (!insideOverlay && !this._contains(this, x, y)) {
-                    // Grab-less fallback: close on Shell-chrome clicks, but
-                    // let the pill's own handler do the toggling.
-                    this._collapse();
-                }
-
+            if (type !== Clutter.EventType.BUTTON_PRESS &&
+                type !== Clutter.EventType.TOUCH_BEGIN)
                 return Clutter.EVENT_PROPAGATE;
-            });
+
+            const target = global.stage.get_event_actor(event);
+            if (this._overlay.contains(target))
+                return Clutter.EVENT_PROPAGATE;
+
+            // Menu semantics: the first click outside only dismisses.
+            this._collapse();
+            return Clutter.EVENT_STOP;
+        });
+
+        // Without the grab (something else holds it) outside clicks never
+        // reach the overlay; at least dismiss on Shell-chrome clicks.
+        if (!this._grab) {
+            this._stagePressHandler = global.stage.connect('captured-event',
+                (_stage, event) => {
+                    const type = event.type();
+                    if (type !== Clutter.EventType.BUTTON_PRESS &&
+                        type !== Clutter.EventType.TOUCH_BEGIN)
+                        return Clutter.EVENT_PROPAGATE;
+
+                    const [x, y] = event.get_coords();
+                    if (!this._contains(this._overlay, x, y) &&
+                        !this._contains(this, x, y))
+                        this._collapse();
+
+                    return Clutter.EVENT_PROPAGATE;
+                });
+        }
     }
 
     _collapse() {
@@ -427,20 +438,16 @@ class Island extends PanelMenu.Button {
         return row;
     }
 
-    // The card hangs from the bar, macOS-notch style: flush against the
-    // panel's bottom edge (no gap; the CSS squares the top corners) and
-    // centered under the pill, so it reads as the pill growing open.
+    // True notch: the card starts at the very top edge of the screen and
+    // covers its slice of the bar (top chrome stacks above the panel), so
+    // no theme margin or panel styling can leave a colored seam. Always
+    // dead-centered on the monitor, like the real thing; this runs again
+    // on every content change, so it stays centered as the card resizes.
     _positionOverlay() {
         const monitor = Main.layoutManager.primaryMonitor;
         const [, width] = this._overlay.get_preferred_width(-1);
-
-        const [pillX] = this.get_transformed_position();
-        const [pillWidth] = this.get_transformed_size();
-        let x = Math.round(pillX + pillWidth / 2 - width / 2);
-        x = Math.max(monitor.x,
-            Math.min(x, monitor.x + monitor.width - width));
-
-        this._overlay.set_position(x, monitor.y + Main.panel.height);
+        const x = monitor.x + Math.round((monitor.width - width) / 2);
+        this._overlay.set_position(x, monitor.y);
     }
 
     // Is the stage point (x, y) inside this actor?
