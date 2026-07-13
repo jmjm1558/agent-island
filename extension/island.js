@@ -23,7 +23,11 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
 const OVERLAY_ANIMATION_MS = 250;
-const PULSE_MS = 900;
+
+// Working-dot "breathing": Apple-subtle on purpose. Long period and a
+// shallow opacity dip; anything stronger reads as an alert, not a status.
+const PULSE_MS = 2000;
+const PULSE_MIN_OPACITY = 170;
 
 // How each state looks. The CSS classes live in stylesheet.css.
 const STATE_LABEL = {
@@ -138,12 +142,12 @@ class Island extends PanelMenu.Button {
         const pulse = new Clutter.PropertyTransition({
             property_name: 'opacity',
             duration: PULSE_MS,
-            progress_mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
+            progress_mode: Clutter.AnimationMode.EASE_IN_OUT_SINE,
             repeat_count: -1,
             auto_reverse: true,
         });
         pulse.set_from(255);
-        pulse.set_to(80);
+        pulse.set_to(PULSE_MIN_OPACITY);
         dot.add_transition('agent-island-pulse', pulse);
     }
 
