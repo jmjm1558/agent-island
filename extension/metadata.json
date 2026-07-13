@@ -1,0 +1,8 @@
+{
+    "uuid": "agent-island@jmjm1558.github.io",
+    "name": "Agent Island",
+    "description": "A Dynamic Island for the GNOME top bar: live status of the AI coding agent sessions (Claude Code, Codex) running on this machine. Click the pill to expand. State is fed by agent lifecycle hooks through files in $XDG_RUNTIME_DIR/agent-island; the extension only watches those files, it never polls.",
+    "shell-version": ["45", "46"],
+    "url": "https://github.com/jmjm1558/agent-island",
+    "version-name": "0.1.0"
+}

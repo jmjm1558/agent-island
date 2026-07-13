@@ -1,0 +1,21 @@
+{
+  "//": "Hook registration for Codex CLI (~/.codex/hooks.json).",
+  "//how": "install.sh --codex merges this for you, replacing __HOOK__ with the absolute path of agent-island-hook.sh. Codex requires a one-time trust step afterwards: run /hooks inside codex and approve the new hooks.",
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "__HOOK__ codex"}]}
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "__HOOK__ codex"}]}
+    ],
+    "PreToolUse": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "__HOOK__ codex"}]}
+    ],
+    "PermissionRequest": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "__HOOK__ codex"}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "__HOOK__ codex"}]}
+    ]
+  }
+}

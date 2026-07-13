@@ -1,0 +1,27 @@
+{
+  "//": "Hook registration for Claude Code (~/.claude/settings.json).",
+  "//how": "install.sh --claude merges this for you, replacing __HOOK__ with the absolute path of agent-island-hook.sh. To do it by hand, copy the entries into the 'hooks' object of your settings.json.",
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "__HOOK__ claude-code", "timeout": 10}]}
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "__HOOK__ claude-code", "timeout": 10}]}
+    ],
+    "PreToolUse": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "__HOOK__ claude-code", "timeout": 10, "async": true}]}
+    ],
+    "PermissionRequest": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "__HOOK__ claude-code", "timeout": 10, "async": true}]}
+    ],
+    "Notification": [
+      {"matcher": "permission_prompt|idle_prompt|agent_needs_input|elicitation_dialog", "hooks": [{"type": "command", "command": "__HOOK__ claude-code", "timeout": 10, "async": true}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "__HOOK__ claude-code", "timeout": 10}]}
+    ],
+    "SessionEnd": [
+      {"hooks": [{"type": "command", "command": "__HOOK__ claude-code", "timeout": 10}]}
+    ]
+  }
+}
