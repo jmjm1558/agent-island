@@ -354,20 +354,28 @@ class Island extends PanelMenu.Button {
             return;
         }
 
-        // Busy sessions always show; idle ones fold into one quiet line.
+        // Busy sessions always show. Idle ones stay folded behind one quiet
+        // line; when nothing is busy we show the 3 freshest so the card is
+        // not empty, but it NEVER grows into a floor-length list again.
         const busy = sessions.filter(s => s.state !== 'idle');
         const idle = sessions.filter(s => s.state === 'idle');
 
         for (const session of busy)
             this._overlay.add_child(this._makeRow(session));
 
-        if (idle.length > 0 && (this._showIdle || busy.length === 0)) {
-            for (const session of idle)
-                this._overlay.add_child(this._makeRow(session));
-        } else if (idle.length > 0) {
+        const visibleIdle = this._showIdle
+            ? idle
+            : (busy.length === 0 ? idle.slice(0, 3) : []);
+        for (const session of visibleIdle)
+            this._overlay.add_child(this._makeRow(session));
+
+        const hidden = idle.length - visibleIdle.length;
+        if (hidden > 0) {
             const toggle = new St.Button({
                 style_class: 'agent-island-idle-toggle',
-                label: `${idle.length} idle session${idle.length > 1 ? 's' : ''}`,
+                label: visibleIdle.length > 0
+                    ? `${hidden} more idle`
+                    : `${hidden} idle session${hidden > 1 ? 's' : ''}`,
             });
             toggle.connect('clicked', () => {
                 this._showIdle = true;
