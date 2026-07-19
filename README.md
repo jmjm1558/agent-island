@@ -19,6 +19,9 @@ Collapsed, it is one dot per session, colored by state:
 
 The expanded card is a notch hub, not just an agent list:
 
+- **Jump to session**: click an agent row to focus its terminal. Sessions
+  managed by tmux select the exact pane; detached aoe sessions open a
+  terminal already attached to the right session.
 - **Now playing** (MPRIS: Spotify, browsers, mpv...): cover art, track info
   and prev/play/next controls above the sessions; the pill shows a small
   note while something plays. If you run another music pill extension you
@@ -34,7 +37,7 @@ center. Disabling the extension puts everything back.
 
 ## How it works
 
-No polling, no daemon, no sockets. Three small pieces:
+No polling, no Agent Island daemon, no custom socket. Three small pieces:
 
 ```
 Claude Code ──┐  lifecycle hooks        ┌────────────────────────────┐
@@ -49,10 +52,13 @@ Codex ────────┘  file per session       │ island/<agent>-<id
 ```
 
 - Both Claude Code and Codex expose **lifecycle hooks** with the same JSON
-  schema. A single 60-line shell script ([hooks/agent-island-hook.sh](hooks/agent-island-hook.sh))
-  maps hook events to a session state and writes it atomically to a tmpfs file.
+  schema. A shared shell adapter ([hooks/agent-island-hook.sh](hooks/agent-island-hook.sh))
+  maps hook events to a session state, captures a terminal PID or exact tmux
+  target when available, and writes the result atomically to a tmpfs file.
 - The extension watches that directory with a file monitor, so state changes
-  are pushed to the UI. Zero CPU cost while nothing happens.
+  are pushed to the UI. Zero CPU cost while nothing happens. Clicking a row
+  uses the captured target, with window-title matching only as a compatibility
+  fallback for older state files.
 - The state dir lives in `$XDG_RUNTIME_DIR` (memory-backed, per-user, wiped
   on logout), so dead sessions cannot survive a reboot.
 
@@ -138,6 +144,7 @@ install.sh            symlink + optional hook registration (idempotent)
 
 - [x] Media module in the expanded card (MPRIS: art, title, controls)
 - [x] Notification peek: recent notifications inside the card
+- [x] Click-to-session navigation, including exact tmux pane selection
 - [ ] Live-activity chips inline in the pill (e.g. "needs input" text, not
       just a dot)
 - [ ] More agents (Gemini CLI, Aider) — contributions welcome, it is one

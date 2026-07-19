@@ -179,7 +179,8 @@
     color: #565f89;
 }
 
-/* The "album art" square: agent initial on a colored rounded square. */
+/* Known agents fill this square with their bundled icon. The text styling
+ * remains for the initial shown by unknown agents. */
 .agent-island-avatar {
     width: 44px;
     height: 44px;
@@ -190,8 +191,10 @@
     font-size: 14pt;
 }
 
-.agent-island-avatar-claude-code { background-color: #c15f3c; }
-.agent-island-avatar-codex       { background-color: #10a37f; }
+.agent-island-avatar-claude-code,
+.agent-island-avatar-codex {
+    background-color: transparent;
+}
 
 .agent-island-row-text {
     spacing: 1px;

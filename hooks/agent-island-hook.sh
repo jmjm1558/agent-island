@@ -18,9 +18,54 @@
 #     therefore never sees a half-written JSON.
 
 agent="${1:-unknown}"
-dir="${XDG_RUNTIME_DIR:-/tmp}/agent-island"
+runtime_dir="${XDG_RUNTIME_DIR:-}"
+dir="${runtime_dir:+$runtime_dir/agent-island}"
+
+terminal_pid_from() {
+    local pid="${1:-}" comm
+
+    while [ -n "$pid" ] && [ "$pid" -gt 1 ] 2>/dev/null; do
+        comm=$(cat "/proc/$pid/comm" 2>/dev/null) || return 0
+        case "$comm" in
+            gnome-terminal-*|kgx|ptyxis|kitty|alacritty|wezterm-gui|foot|konsole|xterm)
+                printf '%s\n' "$pid"
+                return 0
+                ;;
+        esac
+        pid=$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null) || return 0
+    done
+}
+
+capture_jump_target() {
+    term_pid=""
+    tmux_socket=""
+    tmux_target=""
+    tmux_client_tty=""
+
+    if [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ]; then
+        tmux_socket="${TMUX%,*,*}"
+        tmux_target=$(tmux -S "$tmux_socket" display-message \
+            -p -t "$TMUX_PANE" \
+            '#{session_name}:#{window_index}.#{pane_index}' 2>/dev/null) ||
+            tmux_target=""
+
+        local tmux_session client_tty client_pid client_session
+        tmux_session="${tmux_target%%:*}"
+        while IFS='|' read -r client_tty client_pid client_session; do
+            [ "$client_session" = "$tmux_session" ] || continue
+            tmux_client_tty="$client_tty"
+            term_pid=$(terminal_pid_from "$client_pid")
+            break
+        done < <(tmux -S "$tmux_socket" list-clients \
+            -F '#{client_tty}|#{client_pid}|#{session_name}' 2>/dev/null)
+        return 0
+    fi
+
+    term_pid=$(terminal_pid_from "$PPID")
+}
 
 main() {
+    [ -n "$runtime_dir" ] || return 0
     command -v jq >/dev/null 2>&1 || return 0
 
     input=$(cat) || return 0
@@ -78,6 +123,7 @@ main() {
 
     mkdir -p "$dir" || return 0
     cwd=$(jq -r '.cwd // empty' <<<"$input")
+    capture_jump_target
 
     tmp=$(mktemp "$dir/.${agent}-${session_id}.XXXXXX") || return 0
     jq -n \
@@ -86,9 +132,15 @@ main() {
         --arg cwd "$cwd" \
         --arg title "$title" \
         --arg task "$task" \
+        --argjson term_pid "${term_pid:-null}" \
+        --arg tmux_socket "$tmux_socket" \
+        --arg tmux_target "$tmux_target" \
+        --arg tmux_client_tty "$tmux_client_tty" \
         --argjson ts "$(date +%s)" \
         '{agent: $agent, state: $state, cwd: $cwd, title: $title,
-          task: $task, ts: $ts}' >"$tmp" &&
+          task: $task, term_pid: $term_pid, tmux_socket: $tmux_socket,
+          tmux_target: $tmux_target, tmux_client_tty: $tmux_client_tty,
+          ts: $ts}' >"$tmp" &&
         mv -f "$tmp" "$file"
     rm -f "$tmp" 2>/dev/null
     return 0

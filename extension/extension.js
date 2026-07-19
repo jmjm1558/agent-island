@@ -27,7 +27,9 @@ export default class AgentIslandExtension extends Extension {
         this._media = new MediaWatcher();
         this._notifications = new NotificationWatcher();
 
-        this._island = new Island(this._store, this._media, this._notifications);
+        this._island = new Island(
+            this._store, this._media, this._notifications, this.path);
+
         // 'agentIsland' is our role name in the panel's status area.
         // Position 0 in the 'center' box = leftmost slot of the center.
         Main.panel.addToStatusArea('agentIsland', this._island, 0, 'center');

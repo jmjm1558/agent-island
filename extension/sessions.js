@@ -126,6 +126,14 @@ export class SessionStore extends Signals.EventEmitter {
             cwd: typeof raw.cwd === 'string' ? raw.cwd : '',
             title: typeof raw.title === 'string' ? raw.title : '',
             task: typeof raw.task === 'string' ? raw.task : '',
+            termPid: Number.isSafeInteger(raw.term_pid) && raw.term_pid > 1
+                ? raw.term_pid : null,
+            tmuxSocket: typeof raw.tmux_socket === 'string'
+                ? raw.tmux_socket : '',
+            tmuxTarget: typeof raw.tmux_target === 'string'
+                ? raw.tmux_target : '',
+            tmuxClientTty: typeof raw.tmux_client_tty === 'string'
+                ? raw.tmux_client_tty : '',
             ts: Number.isFinite(raw.ts) ? raw.ts : GLib.get_real_time() / 1e6,
         };
     }

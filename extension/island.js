@@ -39,16 +39,24 @@ const STATE_LABEL = {
     idle: 'idle',
 };
 
-// Display name and avatar letter per agent. Anything unknown falls back to
-// its raw name, so new agents work without touching this file.
+// Display name and bundled icon per agent. Anything unknown falls back to
+// its raw name and initial, so new agents work without touching this file.
 const AGENT_META = {
-    'claude-code': {label: 'Claude Code', initial: 'C'},
-    'codex': {label: 'Codex', initial: 'X'},
+    'claude-code': {
+        label: 'Claude Code',
+        initial: 'C',
+        icon: 'claude-code.svg',
+    },
+    'codex': {
+        label: 'Codex',
+        initial: 'X',
+        icon: 'codex.png',
+    },
 };
 
 export const Island = GObject.registerClass(
 class Island extends PanelMenu.Button {
-    _init(store, media, notifications) {
+    _init(store, media, notifications, extensionPath) {
         // '0.0, name, true': the `true` tells PanelMenu.Button NOT to create
         // its usual dropdown menu - we manage our own overlay instead.
         super._init(0.0, 'Agent Island', true);
@@ -56,6 +64,8 @@ class Island extends PanelMenu.Button {
         this._store = store;
         this._media = media;
         this._notifications = notifications;
+        this._assetsPath =
+            GLib.build_filenamev([extensionPath, 'assets']);
         this._overlay = null;
         this._grab = null;
         this._stagePressHandler = 0;
@@ -535,16 +545,30 @@ class Island extends PanelMenu.Button {
             x_align: Clutter.ActorAlign.FILL,
         });
 
-        // The "album art": a rounded square with the agent's initial.
+        // Known agents use bundled official artwork. The initial remains a
+        // deliberate fallback for unknown agents or a missing asset.
+        const iconFile = meta.icon
+            ? Gio.File.new_for_path(GLib.build_filenamev([
+                this._assetsPath, meta.icon,
+            ]))
+            : null;
+        const avatarChild = iconFile?.query_exists(null)
+            ? new St.Icon({
+                gicon: new Gio.FileIcon({file: iconFile}),
+                icon_size: 44,
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
+            })
+            : new St.Label({
+                text: meta.initial,
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
+            });
         const avatar = new St.Bin({
             style_class:
                 `agent-island-avatar agent-island-avatar-${session.agent}`,
             y_align: Clutter.ActorAlign.CENTER,
-            child: new St.Label({
-                text: meta.initial,
-                x_align: Clutter.ActorAlign.CENTER,
-                y_align: Clutter.ActorAlign.CENTER,
-            }),
+            child: avatarChild,
         });
         row.add_child(avatar);
 
@@ -599,21 +623,119 @@ class Island extends PanelMenu.Button {
         return button;
     }
 
-    // Best effort "take me to that session": VS Code, terminals and most
-    // editors put the working directory's name in their window title, so
-    // focus the most recently used window that mentions it.
+    // Hook metadata identifies the terminal or tmux pane deterministically.
+    // Older state files still work through the project-name title fallback.
     _focusSessionWindow(session) {
-        const project =
-            GLib.path_get_basename(session.cwd || '').toLowerCase();
-        if (!project)
-            return;
-
         const windows =
             global.display.get_tab_list(Meta.TabList.NORMAL, null);
-        const match = windows.find(window =>
-            (window.get_title() ?? '').toLowerCase().includes(project));
+        const project =
+            GLib.path_get_basename(session.cwd || '').toLowerCase();
+        const titleMatchesProject = window => project &&
+            (window.get_title() ?? '').toLowerCase().includes(project);
+        const pidMatches = session.termPid
+            ? windows.filter(window => window.get_pid() === session.termPid)
+            : [];
+        const pidMatch =
+            pidMatches.find(titleMatchesProject) ?? pidMatches[0] ?? null;
+        const titleMatch = project
+            ? windows.find(titleMatchesProject) ?? null
+            : null;
+
+        if (session.tmuxSocket && session.tmuxTarget) {
+            if (session.tmuxClientTty) {
+                this._selectTmuxTarget(session);
+                const existingWindow = pidMatch ?? titleMatch;
+                if (existingWindow) {
+                    Main.activateWindow(existingWindow);
+                    return;
+                }
+            }
+
+            // aoe keeps its tmux sessions detached. Opening a terminal and
+            // attaching is therefore the normal path, not an error fallback.
+            if (this._attachTmuxTarget(session))
+                return;
+        }
+
+        const match = pidMatch ?? titleMatch;
         if (match)
             Main.activateWindow(match);
+    }
+
+    _tmuxCommand(session) {
+        const tmux = GLib.find_program_in_path('tmux');
+        const separator = session.tmuxTarget.lastIndexOf(':');
+        const paneSeparator = session.tmuxTarget.lastIndexOf('.');
+        if (!tmux || separator <= 0 ||
+            paneSeparator <= separator + 1 ||
+            paneSeparator === session.tmuxTarget.length - 1)
+            return null;
+
+        return {
+            argv: [
+                tmux, '-S', session.tmuxSocket,
+                'select-window', '-t',
+                session.tmuxTarget.slice(0, paneSeparator),
+                ';', 'select-pane', '-t', session.tmuxTarget,
+            ],
+            sessionName: session.tmuxTarget.slice(0, separator),
+        };
+    }
+
+    _selectTmuxTarget(session) {
+        const command = this._tmuxCommand(session);
+        if (!command)
+            return false;
+
+        command.argv.push(
+            ';', 'switch-client',
+            '-c', session.tmuxClientTty,
+            '-t', command.sessionName);
+        return this._spawn(command.argv);
+    }
+
+    _attachTmuxTarget(session) {
+        const command = this._tmuxCommand(session);
+        if (!command)
+            return false;
+
+        command.argv.push(';', 'attach-session', '-t', command.sessionName);
+        const terminalArgv = this._terminalCommand(command.argv);
+        if (!terminalArgv) {
+            Main.notify(
+                'Agent Island',
+                'No supported terminal emulator was found.');
+            return false;
+        }
+
+        return this._spawn(terminalArgv);
+    }
+
+    _terminalCommand(command) {
+        const launchers = [
+            ['gnome-terminal', ['--']],
+            ['kitty', []],
+            ['konsole', ['-e']],
+            ['x-terminal-emulator', ['-e']],
+        ];
+
+        for (const [program, prefix] of launchers) {
+            const executable = GLib.find_program_in_path(program);
+            if (executable)
+                return [executable, ...prefix, ...command];
+        }
+        return null;
+    }
+
+    _spawn(argv) {
+        try {
+            Gio.Subprocess.new(argv, Gio.SubprocessFlags.NONE);
+            return true;
+        } catch (e) {
+            console.warn(
+                'Agent Island: cannot run ' + argv[0] + ': ' + e.message);
+            return false;
+        }
     }
 
     // True notch: the card starts at the very top edge of the screen and
