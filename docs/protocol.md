@@ -1,6 +1,6 @@
 # State file protocol
 
-Agent Island renders whatever it finds in `$XDG_RUNTIME_DIR/agent-island/`.
+Agent Island reads process-verified sessions in `$XDG_RUNTIME_DIR/agent-island/`.
 Anything that can write a JSON file can appear in the island: an agent CLI,
 a CI watcher, a long-running script. This document is the whole contract.
 
@@ -10,7 +10,7 @@ a CI watcher, a long-running script. This document is the whole contract.
 $XDG_RUNTIME_DIR/agent-island/<agent>-<session-id>.json
 ```
 
-- One file per live session. The file IS the session: create it to appear,
+- One file per live session. The file describes a session with a live process: create it to appear,
   rewrite it to change state, delete it to disappear.
 - `$XDG_RUNTIME_DIR` (usually `/run/user/<uid>`) is a tmpfs: per-user
   permissions, RAM-backed, wiped on logout. Do not use `/tmp`.
@@ -23,6 +23,9 @@ $XDG_RUNTIME_DIR/agent-island/<agent>-<session-id>.json
 {
   "agent": "claude-code",
   "state": "working",
+  "session_id": "session-uuid",
+  "agent_pid": 1234,
+  "agent_started": "987654",
   "cwd": "/home/me/some-project",
   "title": "",
   "task": "Refactor the session adapter",
@@ -38,6 +41,9 @@ $XDG_RUNTIME_DIR/agent-island/<agent>-<session-id>.json
 |-------|------|----------|---------|
 | `agent` | string | yes | Agent identifier, kebab-case (`claude-code`, `codex`). Shown in the card; unknown agents get a generic avatar. |
 | `state` | string | yes | `working`, `waiting` (needs the human) or `idle`. Anything else is treated as `idle`. |
+| `session_id` | string | yes | Stable task ID, also used to merge duplicate Codex Desktop tasks. |
+| `agent_pid` | number | yes | Live agent process PID. Files without process identity are hidden. |
+| `agent_started` | string | recommended | Field 22 of `/proc/<pid>/stat`, to detect PID reuse. The reference hook always supplies it. |
 | `cwd` | string | no | Session working directory. Its basename becomes the row title. |
 | `title` | string | no | Session title, used when `task` is empty. |
 | `task` | string | no | Short description of the current work. Preferred as the row title. |
@@ -45,7 +51,7 @@ $XDG_RUNTIME_DIR/agent-island/<agent>-<session-id>.json
 | `tmux_socket` | string | no | Absolute path to the tmux server socket. |
 | `tmux_target` | string | no | Exact tmux target as `<session>:<window>.<pane>`. |
 | `tmux_client_tty` | string | no | TTY of an attached tmux client. Empty when the session is detached. |
-| `ts` | number | no | Unix epoch seconds of the last state change. Sessions older than 6 hours are hidden (crash protection). Defaults to "now" when missing. |
+| `ts` | number | no | Unix epoch seconds of the last state change. Idle sessions disappear after 30 minutes; process-verified working/waiting sessions remain. SessionStart renews visibility when context is loaded. Defaults to "now" when missing. |
 
 The jump fields are optional and backward compatible. On click, the extension
 selects the exact tmux pane and switches its attached client when possible. A

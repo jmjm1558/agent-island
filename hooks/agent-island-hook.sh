@@ -124,9 +124,25 @@ main() {
     mkdir -p "$dir" || return 0
     cwd=$(jq -r '.cwd // empty' <<<"$input")
     capture_jump_target
+    agent_pid=""
+    agent_started=""
+    local ancestor="$PPID" process_name
+    while [ "$ancestor" -gt 1 ] 2>/dev/null; do
+        process_name=$(cat "/proc/$ancestor/comm" 2>/dev/null) || break
+        case "$process_name" in
+            codex|claude|claude-code)
+                agent_pid="$ancestor"
+                agent_started=$(awk '{print $22}' "/proc/$ancestor/stat" 2>/dev/null)
+                break ;;
+        esac
+        ancestor=$(awk '{print $4}' "/proc/$ancestor/stat" 2>/dev/null) || break
+    done
 
     tmp=$(mktemp "$dir/.${agent}-${session_id}.XXXXXX") || return 0
     jq -n \
+        --arg session_id "$session_id" \
+        --argjson agent_pid "${agent_pid:-null}" \
+        --arg agent_started "$agent_started" \
         --arg agent "$agent" \
         --arg state "$state" \
         --arg cwd "$cwd" \
@@ -137,7 +153,7 @@ main() {
         --arg tmux_target "$tmux_target" \
         --arg tmux_client_tty "$tmux_client_tty" \
         --argjson ts "$(date +%s)" \
-        '{agent: $agent, state: $state, cwd: $cwd, title: $title,
+        '{session_id: $session_id, agent_pid: $agent_pid, agent_started: $agent_started, agent: $agent, state: $state, cwd: $cwd, title: $title,
           task: $task, term_pid: $term_pid, tmux_socket: $tmux_socket,
           tmux_target: $tmux_target, tmux_client_tty: $tmux_client_tty,
           ts: $ts}' >"$tmp" &&

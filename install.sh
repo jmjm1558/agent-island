@@ -15,6 +15,8 @@ UUID="agent-island@jmjm1558.github.io"
 EXT_LINK="$HOME/.local/share/gnome-shell/extensions/$UUID"
 HOOK="$REPO/hooks/agent-island-hook.sh"
 
+glib-compile-schemas "$REPO/extension/schemas"
+
 # ---- 1. the extension itself -------------------------------------------
 # A symlink instead of a copy, so a `git pull` updates the installed
 # extension too (after the next login).

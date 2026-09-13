@@ -1,95 +1,117 @@
-// Island - the UI side of Agent Island.
-//
-// Two pieces:
-//   - The pill: a small rounded widget living in the center of the top bar.
-//     It shows one dot per agent session, colored by state (green working,
-//     amber waiting for you, gray idle). Working dots pulse.
-//   - The overlay: a bigger rounded panel that drops down from the bar when
-//     you click the pill, listing every session with its directory, agent
-//     and state. Click the pill again, click elsewhere, or press Escape to
-//     close it.
-//
-// The overlay is a Shell chrome actor (it belongs to the compositor scene,
-// not to any window), which is what makes a real floating, always-on-top
-// island possible on Wayland - ordinary apps cannot do this under GNOME
-// because Mutter does not implement the wlr-layer-shell protocol.
-
+// A persistent top-edge notch. Automatic previews never take keyboard focus;
+// opening the notification center explicitly uses the Shell's modal grab.
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
+import Pango from 'gi://Pango';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
+import {Controls} from './controls.js';
+import {Spectrum} from './spectrum.js';
+
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import {Urgency, NotificationDestroyedReason} from 'resource:///org/gnome/shell/ui/messageTray.js';
 
-const OVERLAY_ANIMATION_MS = 250;
-
-// Working-dot "breathing": Apple-subtle on purpose. Long period and a
-// shallow opacity dip; anything stronger reads as an alert, not a status.
-const PULSE_MS = 2000;
-const PULSE_MIN_OPACITY = 170;
-
-// How each state looks. The CSS classes live in stylesheet.css.
-const STATE_LABEL = {
-    working: 'working',
-    waiting: 'needs input',
-    idle: 'idle',
-};
-
-// Display name and bundled icon per agent. Anything unknown falls back to
-// its raw name and initial, so new agents work without touching this file.
+const COLLAPSED_WIDTH = 248;
+const EXPANDED_WIDTH = 480;
+const MORPH_MS = 360;
+const PREVIEW_MS = 2500;
+const STATE_LABEL = {working: 'Trabajando', waiting: 'Te necesita', idle: 'En pausa'};
 const AGENT_META = {
-    'claude-code': {
-        label: 'Claude Code',
-        initial: 'C',
-        icon: 'claude-code.svg',
-    },
-    'codex': {
-        label: 'Codex',
-        initial: 'X',
-        icon: 'codex.png',
-    },
+    'claude-code': {label: 'Claude Code', initial: 'C', icon: 'claude-code.svg'},
+    'codex-desktop': {label: 'Codex · App', initial: 'X', icon: 'codex.png'},
+    codex: {label: 'Codex', initial: 'X', icon: 'codex.png'},
 };
 
 export const Island = GObject.registerClass(
 class Island extends PanelMenu.Button {
-    _init(store, media, notifications, extensionPath) {
-        // '0.0, name, true': the `true` tells PanelMenu.Button NOT to create
-        // its usual dropdown menu - we manage our own overlay instead.
+    _init(store, media, notifications, extensionPath, preferences) {
         super._init(0.0, 'Agent Island', true);
-
         this._store = store;
         this._media = media;
         this._notifications = notifications;
-        this._assetsPath =
-            GLib.build_filenamev([extensionPath, 'assets']);
-        this._overlay = null;
+        this._assetsPath = GLib.build_filenamev([extensionPath, 'assets']);
+        this._view = 'alerts';
+        this._expandedGroups = new Set();
+        this._expanded = false;
+        this._preview = null;
+        this._pending = [];
         this._grab = null;
-        this._stagePressHandler = 0;
-        this._view = 'sessions';   // which card view is active
-        this._showIdle = false;    // idle sessions expanded in the list?
-
-        this._pill = new St.BoxLayout({
-            style_class: 'agent-island-pill',
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        this.add_child(this._pill);
-
-        // connectObject ties the signal's lifetime to `this`: when the
-        // island actor is destroyed the handlers are disconnected for us.
-        this._store.connectObject('changed', () => this._sync(), this);
-        this._media.connectObject('changed', () => this._sync(), this);
-        this._notifications.connectObject('changed', () => this._sync(), this);
-        this.connect('destroy', () => this._onIslandDestroyed());
-
-        this._sync();
-
-        // Dev harness: the nested-shell test script cannot click, so it
-        // exports AGENT_ISLAND_AUTOEXPAND=1 to see the overlay open.
+        this._syncId = 0;
+        this._previewId = 0;
         this._autoExpandId = 0;
+        this._settings = new Gio.Settings({schema_id: 'org.gnome.desktop.notifications'});
+        this._settingsId = this._settings.connect('changed::show-banners', () => {
+            if (!this._settings.get_boolean('show-banners')) {
+                this._pending = this._pending.filter(n => n.urgency === Urgency.CRITICAL);
+                if (this._preview?.urgency !== Urgency.CRITICAL)
+                    this._finishPreview();
+            }
+            this._queueSync();
+        });
+        // Reserve panel space; the visible notch lives above panel theme margins.
+        this.add_child(new St.Widget({width: COLLAPSED_WIDTH}));
+        this.reactive = false;
+        this.can_focus = false;
+        this._surface = new St.BoxLayout({
+            name: 'agent-island-notch', style_class: 'agent-island-surface',
+            vertical: true, reactive: true, track_hover: true, can_focus: true,
+            width: COLLAPSED_WIDTH, clip_to_allocation: true,
+        });
+        this._header = new St.Button({
+            style_class: 'agent-island-header', can_focus: true,
+            accessible_name: 'Abrir centro de notificaciones', x_expand: true,
+        });
+        this._pill = new St.BoxLayout({style_class: 'agent-island-pill', x_expand: true});
+        this._header.set_child(this._pill);
+        this._header.connect('clicked', () => this._expanded ? this._collapse() : this._expand());
+        this._surface.add_child(this._header);
+        this._body = new St.BoxLayout({vertical: true, style_class: 'agent-island-body'});
+        this._surface.add_child(this._body);
+        Main.layoutManager.addTopChrome(this._surface);
+        this._ears = [false, true].map(right => {
+            const ear = new St.DrawingArea({width: 12, height: 12});
+            ear.connect('repaint', area => {
+                const cr = area.get_context();
+                const [w, h] = area.get_surface_size();
+                cr.setSourceRGBA(0, 0, 0, 1);
+                if (right) {
+                    cr.moveTo(0, h); cr.lineTo(0, 0); cr.lineTo(w, 0);
+                    cr.curveTo(w * 0.45, 0, 0, h * 0.45, 0, h);
+                } else {
+                    cr.moveTo(0, 0); cr.lineTo(w, 0); cr.lineTo(w, h);
+                    cr.curveTo(w, h * 0.45, w * 0.55, 0, 0, 0);
+                }
+                cr.fill(); cr.$dispose();
+            });
+            Main.layoutManager.addTopChrome(ear, {affectsInputRegion: false});
+            return ear;
+        });
+        this._surface.connect('notify::width', () => this._positionOverlay());
+        this._surface.connect('notify::hover', () => {
+            this._cancelPreviewTimer();
+            if (!this._surface.hover)
+                this._armPreviewTimer();
+        });
+        this._surface.connect('captured-event', (_, event) => this._onCapturedEvent(event));
+        Main.layoutManager.connectObject('monitors-changed', () => this._render(), this);
+        Main.panel.connectObject('notify::height', () => this._render(), this);
+        Main.overview.connectObject('showing', () => this._collapse(), this);
+        global.display.connectObject('in-fullscreen-changed', () => this._syncVisibility(), this);
+        this._store.connectObject('changed', () => this._queueSync(), this);
+        this._media.connectObject('changed', () => this._queueSync(), this);
+        this._notifications.connectObject('changed', () => this._queueSync(), this);
+        this.connect('destroy', () => this._onIslandDestroyed());
+        this._spectrumBars = [];
+        this._spectrum = new Spectrum(extensionPath, levels => this._updateSpectrum(levels));
+        this._preferences = preferences;
+        this._controls = new Controls(preferences, this);
+        this._render(false);
+        this._notifications.startPresentation(notification => this._present(notification));
         if (GLib.getenv('AGENT_ISLAND_AUTOEXPAND') === '1') {
             this._autoExpandId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => {
                 this._autoExpandId = 0;
@@ -99,365 +121,440 @@ class Island extends PanelMenu.Button {
         }
     }
 
-    // PanelMenu.Button toggles its menu on click; we have no menu, so we
-    // intercept the same events to toggle the overlay.
-    vfunc_event(event) {
-        const type = event.type();
-        if (type === Clutter.EventType.BUTTON_PRESS ||
-            type === Clutter.EventType.TOUCH_BEGIN)
-            this._toggle();
-
-        return Clutter.EVENT_PROPAGATE;
+    _queueSync() {
+        // A notification update emits several properties in one main-loop turn.
+        // Coalesce them and never destroy a button in its own clicked handler.
+        if (!this._syncId) {
+            this._syncId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                this._syncId = 0;
+                const live = this._notifications.notifications;
+                this._pending = this._pending.filter(n => live.includes(n));
+                if (this._preview && !live.includes(this._preview)) {
+                    this._cancelPreviewTimer();
+                    this._preview = null;
+                    this._nextPreview();
+                }
+                this._render();
+                return GLib.SOURCE_REMOVE;
+            });
+        }
     }
 
-    _toggle() {
-        if (this._overlay)
-            this._collapse();
-        else
-            this._expand();
+    _present(notification) {
+        if (!this._surface || !Main.layoutManager.primaryMonitor)
+            return false;
+        if (this._expanded) {
+            this._queueSync();
+            return true;
+        }
+        if (this._preview === notification) {
+            this._cancelPreviewTimer();
+            this._queueSync();
+            this._armPreviewTimer();
+        } else if (!this._pending.includes(notification)) {
+            if (notification.urgency === Urgency.CRITICAL)
+                this._pending.unshift(notification);
+            else
+                this._pending.push(notification);
+            if (!this._preview)
+                this._nextPreview();
+            else
+                this._queueSync();
+        }
+        return true;
     }
 
-    // ---- pill ----
-
-    _sync() {
-        this._pill.destroy_all_children();
-
-        // Something is playing: hint it in the pill, NotchNook style.
-        if (this._media.player?.status === 'Playing') {
-            this._pill.add_child(new St.Icon({
-                style_class: 'agent-island-pill-music',
-                icon_name: 'audio-x-generic-symbolic',
-                y_align: Clutter.ActorAlign.CENTER,
-            }));
-        }
-
-        // Unseen notifications: a small amber count.
-        const notificationCount = this._notifications.notifications.length;
-        if (notificationCount > 0) {
-            this._pill.add_child(new St.Label({
-                style_class: 'agent-island-pill-notif',
-                text: `${notificationCount}`,
-                y_align: Clutter.ActorAlign.CENTER,
-            }));
-        }
-
-        const sessions = this._store.sessions;
-        if (sessions.length === 0 && this._pill.get_n_children() === 0) {
-            this._pill.add_child(this._makeDot('empty'));
-        } else {
-            for (const session of sessions.slice(0, 4)) {
-                const dot = this._makeDot(session.state);
-                this._pill.add_child(dot);
-                if (session.state === 'working')
-                    this._pulse(dot);
-            }
-            if (sessions.length > 4) {
-                this._pill.add_child(new St.Label({
-                    style_class: 'agent-island-more',
-                    text: `+${sessions.length - 4}`,
-                    y_align: Clutter.ActorAlign.CENTER,
-                }));
-            }
-        }
-
-        // Keep the open overlay in sync with reality.
-        if (this._overlay)
-            this._fillOverlay();
+    _nextPreview() {
+        this._preview = this._pending.shift() ?? null;
+        this._render();
+        this._armPreviewTimer();
     }
 
-    _makeDot(state) {
-        return new St.Widget({
-            style_class: `agent-island-dot agent-island-dot-${state}`,
-            y_align: Clutter.ActorAlign.CENTER,
+    _armPreviewTimer() {
+        if (!this._preview || this._previewId || this._surface.hover ||
+            this._preview.urgency === Urgency.CRITICAL)
+            return;
+        this._previewId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, PREVIEW_MS, () => {
+            this._previewId = 0;
+            this._finishPreview();
+            return GLib.SOURCE_REMOVE;
         });
     }
 
-    // Endless soft blink, as a single native repeating transition. Never use
-    // chained ease() callbacks for this: when the actor is not yet mapped
-    // (e.g. while the Shell is still starting up) ease() completes
-    // synchronously and mutual callbacks become infinite recursion.
-    // A transition dies with its actor, so this cannot leak either.
-    _pulse(dot) {
-        const pulse = new Clutter.PropertyTransition({
-            property_name: 'opacity',
-            duration: PULSE_MS,
-            progress_mode: Clutter.AnimationMode.EASE_IN_OUT_SINE,
-            repeat_count: -1,
-            auto_reverse: true,
-        });
-        pulse.set_from(255);
-        pulse.set_to(PULSE_MIN_OPACITY);
-        dot.add_transition('agent-island-pulse', pulse);
+    _cancelPreviewTimer() {
+        if (this._previewId)
+            GLib.source_remove(this._previewId);
+        this._previewId = 0;
     }
 
-    // ---- overlay ----
+    _finishPreview() {
+        this._cancelPreviewTimer();
+        const previous = this._preview;
+        this._preview = null;
+        if (previous?.isTransient && this._notifications.notifications.includes(previous))
+            previous.destroy(NotificationDestroyedReason.EXPIRED);
+        this._nextPreview();
+    }
 
     _expand() {
-        if (this._overlay)
+        if (this._expanded)
             return;
-
-        this._showIdle = false;
-        this._overlay = new St.BoxLayout({
-            style_class: 'agent-island-overlay',
-            vertical: true,
-            reactive: true,
-            can_focus: true,
-        });
-        this._fillOverlay();
-
-        // addTopChrome puts the actor in the Shell's own UI layer, above
-        // all windows and unclipped by the panel.
-        Main.layoutManager.addTopChrome(this._overlay);
-        this._positionOverlay();
-
-        // Drop-down animation: start folded against the bar, then unfold.
-        this._overlay.set_pivot_point(0.5, 0);
-        this._overlay.opacity = 0;
-        this._overlay.scale_y = 0.6;
-        this._overlay.ease({
-            opacity: 255,
-            scale_y: 1,
-            duration: OVERLAY_ANIMATION_MS,
-            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-        });
-
-        this._overlay.grab_key_focus();
-
-        // Grab input like GNOME's own menus do. While the grab is held,
-        // every event in the session is routed through the grabbed actor's
-        // chain, so clicking anywhere - even inside an app window - can
-        // dismiss the island.
-        this._grab = Main.pushModal(this._overlay,
-            {actionMode: Shell.ActionMode.POPUP});
+        this._cancelPreviewTimer();
+        this._preview = null;
+        this._pending = [];
+        this._expanded = true;
+        this._render();
+        this._grab = Main.pushModal(this._surface, {actionMode: Shell.ActionMode.POPUP});
         if (this._grab.get_seat_state() !== Clutter.GrabState.ALL) {
             Main.popModal(this._grab);
             this._grab = null;
-        }
-
-        // Dismissal, straight from the Shell's GrabHelper playbook: while a
-        // Clutter grab is active the STAGE never sees events (they are
-        // retargeted to the grabbed actor), so listen on the overlay itself
-        // and ask get_event_actor() where the click really landed.
-        this._overlay.connect('captured-event', (_actor, event) => {
-            const type = event.type();
-
-            if (type === Clutter.EventType.KEY_PRESS &&
-                event.get_key_symbol() === Clutter.KEY_Escape) {
-                this._collapse();
-                return Clutter.EVENT_STOP;
-            }
-
-            if (type !== Clutter.EventType.BUTTON_PRESS &&
-                type !== Clutter.EventType.TOUCH_BEGIN)
-                return Clutter.EVENT_PROPAGATE;
-
-            const target = global.stage.get_event_actor(event);
-            if (this._overlay.contains(target))
-                return Clutter.EVENT_PROPAGATE;
-
-            // Menu semantics: the first click outside only dismisses.
             this._collapse();
-            return Clutter.EVENT_STOP;
-        });
-
-        // Without the grab (something else holds it) outside clicks never
-        // reach the overlay; at least dismiss on Shell-chrome clicks.
-        if (!this._grab) {
-            this._stagePressHandler = global.stage.connect('captured-event',
-                (_stage, event) => {
-                    const type = event.type();
-                    if (type !== Clutter.EventType.BUTTON_PRESS &&
-                        type !== Clutter.EventType.TOUCH_BEGIN)
-                        return Clutter.EVENT_PROPAGATE;
-
-                    const [x, y] = event.get_coords();
-                    if (!this._contains(this._overlay, x, y) &&
-                        !this._contains(this, x, y))
-                        this._collapse();
-
-                    return Clutter.EVENT_PROPAGATE;
-                });
+            return;
         }
+        this._surface.grab_key_focus();
     }
 
     _collapse() {
-        if (!this._overlay)
-            return;
-
         if (this._grab) {
             Main.popModal(this._grab);
             this._grab = null;
         }
-        if (this._stagePressHandler) {
-            global.stage.disconnect(this._stagePressHandler);
-            this._stagePressHandler = 0;
-        }
+        this._cancelPreviewTimer();
+        this._expanded = false;
+        this._preview = null;
+        this._pending = [];
+        this._render();
+    }
 
-        const overlay = this._overlay;
-        this._overlay = null;
-        overlay.ease({
-            opacity: 0,
-            scale_y: 0.6,
-            duration: OVERLAY_ANIMATION_MS,
-            mode: Clutter.AnimationMode.EASE_IN_QUAD,
-            onComplete: () => overlay.destroy(),
+    _onCapturedEvent(event) {
+        const type = event.type();
+        if (type === Clutter.EventType.KEY_PRESS && event.get_key_symbol() === Clutter.KEY_Escape) {
+            this._collapse();
+            return Clutter.EVENT_STOP;
+        }
+        if (!this._grab || (type !== Clutter.EventType.BUTTON_PRESS && type !== Clutter.EventType.TOUCH_BEGIN))
+            return Clutter.EVENT_PROPAGATE;
+        const target = global.stage.get_event_actor(event);
+        if (target && this._surface.contains(target))
+            return Clutter.EVENT_PROPAGATE;
+        this._collapse();
+        return Clutter.EVENT_STOP;
+    }
+
+    _render(animate = true) {
+        if (!this._surface)
+            return;
+        if (this._controls?.menuOpen)
+            return;
+        this._controls?.detach();
+        this._syncPill();
+        this._syncVisibility();
+        this._body.remove_all_transitions();
+        this._body.destroy_all_children();
+        this._content = null;
+        const open = this._expanded || !!this._preview;
+        this._surface.set_style(`border-radius: 0 0 ${open ? 24 : 12}px ${open ? 24 : 12}px;`);
+        const monitor = Main.layoutManager.primaryMonitor;
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const width = Math.min((open ? EXPANDED_WIDTH : COLLAPSED_WIDTH) * scale,
+            (monitor?.width ?? 1920) - 40 * scale);
+        this._header.height = Main.panel.height || 28 * scale;
+        this._body.visible = open;
+        if (open) {
+            this._body.width = width;
+            if (this._expanded)
+                this._fillOverlay();
+            else
+                this._fillPreview();
+        }
+        const [, bodyHeight] = open ? this._body.get_preferred_height(width) : [0, 0];
+        const height = this._header.height + bodyHeight;
+        this._surface.remove_all_transitions();
+        this._surface.ease({
+            width, height, duration: animate ? MORPH_MS : 0,
+            mode: Clutter.AnimationMode.EASE_OUT_QUINT,
+        });
+        if (open && animate) {
+            this._body.opacity = 0;
+            this._body.translation_y = -6 * scale;
+            this._body.ease({opacity: 255, translation_y: 0, duration: 240,
+                delay: 80, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+        }
+        this._positionOverlay();
+    }
+
+    _syncPill() {
+        this._spectrumBars = [];
+        this._pill.destroy_all_children();
+        const sessions = this._store.sessions;
+        const waiting = sessions.filter(s => s.state === 'waiting').length;
+        const working = sessions.filter(s => s.state === 'working').length;
+        const player = this._media.player;
+        const playing = player?.status === 'Playing';
+        const count = this._notifications.notifications.length;
+        const quiet = !this._settings.get_boolean('show-banners');
+        const icon = new St.Icon({
+            icon_name: this._preview ? 'preferences-system-notifications-symbolic' :
+                quiet ? 'notifications-disabled-symbolic' : 'view-grid-symbolic',
+            style_class: 'agent-island-status-icon', y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._pill.add_child(icon);
+        const title = this._expanded ? 'Tu centro' : this._preview ?
+            this._preview.source.title : waiting ? `${waiting} te necesita${waiting > 1 ? 'n' : ''}` :
+            playing ? player.trackTitle : working ? `${working} en marcha` : 'Todo en calma';
+        this._pill.add_child(this._label(title, 'agent-island-pill-title'));
+        if (playing && !this._preview && !this._expanded) {
+            const bars = new St.BoxLayout({style_class: 'agent-island-wave', y_align: Clutter.ActorAlign.CENTER});
+            this._spectrum.levels.forEach((level, i) => {
+                const bar = new St.Widget({style_class: 'agent-island-wave-bar', height: 20, width: 3,
+                    scale_y: 0.1 + level * 0.9,
+                    y_align: Clutter.ActorAlign.CENTER});
+                bar.set_pivot_point(0.5, 0.5);
+                bars.add_child(bar);
+                bar.set_style(`background-color: ${i < 4 ? '#b5c0ff' : i < 8 ? '#d3c6ff' : '#f0e6ff'};`);
+                this._spectrumBars.push(bar);
+            });
+            this._pill.add_child(bars);
+        } else if (working || waiting) {
+            const dot = this._makeDot(waiting ? 'waiting' : 'working');
+            this._pill.add_child(dot);
+            this._pulse(dot, 'opacity', 255, 120, 1800);
+        }
+        if (count)
+            this._pill.add_child(new St.Label({text: `${count}`, style_class: 'agent-island-count', y_align: Clutter.ActorAlign.CENTER}));
+        if (this._expanded || this._preview)
+            this._pill.add_child(new St.Icon({icon_name: this._expanded ? 'pan-up-symbolic' : 'pan-down-symbolic', icon_size: 12, y_align: Clutter.ActorAlign.CENTER}));
+        this._header.accessible_name = this._expanded ? 'Cerrar centro de notificaciones' : 'Abrir centro de notificaciones';
+    }
+
+    _updateSpectrum(levels) {
+        this._spectrumBars.forEach((bar, i) => {
+            const scale = 0.1 + levels[i] * 0.9;
+            if (St.Settings.get().enable_animations)
+                bar.ease({scale_y: scale, duration: 65, mode: Clutter.AnimationMode.LINEAR});
+            else
+                bar.scale_y = scale;
         });
     }
 
-    _fillOverlay() {
-        this._overlay.destroy_all_children();
-
-        // Media first, like the macOS notch apps: art, track, controls.
-        const player = this._media.player;
-        if (player) {
-            this._overlay.add_child(this._makeMediaRow(player));
-            this._overlay.add_child(
-                new St.Widget({style_class: 'agent-island-separator'}));
-        }
-
-        // One view at a time, switched with small chips (the NotchNook
-        // "Nook | Tray" pattern) instead of stacking everything.
-        this._overlay.add_child(this._makeViewSwitcher());
-        if (this._view === 'sessions')
-            this._fillSessionsView();
-        else
-            this._fillNotificationsView();
-
-        // Content changed => size may have changed => re-center.
-        if (this._overlay.get_parent())
-            this._positionOverlay();
+    _label(text, style, wrap = false) {
+        const label = new St.Label({text: String(text ?? ''), style_class: style,
+            x_expand: true, y_align: Clutter.ActorAlign.CENTER});
+        label.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+        label.clutter_text.line_wrap = wrap;
+        label.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+        return label;
     }
 
-    _makeViewSwitcher() {
-        const tabs = new St.BoxLayout({style_class: 'agent-island-tabs'});
+    _makeDot(state) {
+        return new St.Widget({style_class: `agent-island-dot agent-island-dot-${state}`, y_align: Clutter.ActorAlign.CENTER});
+    }
 
-        const addTab = (id, label) => {
-            const active = this._view === id;
-            const tab = new St.Button({
-                style_class: active
-                    ? 'agent-island-tab agent-island-tab-active'
-                    : 'agent-island-tab',
-                label,
-            });
-            tab.connect('clicked', () => {
-                this._view = id;
-                this._fillOverlay();
-            });
+    _pulse(actor, property, from, to, duration) {
+        if (!St.Settings.get().enable_animations)
+            return;
+        const pulse = new Clutter.PropertyTransition({property_name: property, duration,
+            progress_mode: Clutter.AnimationMode.EASE_IN_OUT_SINE, repeat_count: -1, auto_reverse: true});
+        pulse.set_from(from);
+        pulse.set_to(to);
+        actor.add_transition('agent-island-pulse', pulse);
+    }
+
+    _fillPreview() {
+        this._body.add_child(this._makeNotificationRow(this._preview, true));
+        const footer = new St.BoxLayout({style_class: 'agent-island-preview-footer'});
+        const all = new St.Button({label: this._pending.length ?
+            `Ver todas · ${this._pending.length} en espera` : 'Abrir centro',
+        style_class: 'agent-island-text-button', can_focus: true, x_expand: true, x_align: Clutter.ActorAlign.START});
+        all.connect('clicked', () => this._expand());
+        footer.add_child(all);
+        footer.add_child(this._iconButton('pan-up-symbolic', 'Ocultar aviso', () => this._finishPreview()));
+        this._body.add_child(footer);
+    }
+
+    _fillOverlay() {
+        const top = new St.BoxLayout({style_class: 'agent-island-toolbar'});
+        const tabs = new St.BoxLayout({style_class: 'agent-island-tabs', x_expand: true});
+        for (const [id, title] of [['alerts', 'Avisos'], ['sessions', 'Sesiones'], ['controls', 'Controles'], ['music', 'Música'], ['settings', 'Ajustes']]) {
+            const count = id === 'alerts' ? this._notifications.notifications.length : this._store.sessions.length;
+            const tab = new St.Button({label: ['settings', 'controls', 'music'].includes(id) ? title : `${title}  ${count}`, can_focus: true,
+                style_class: 'agent-island-tab' + (this._view === id ? ' agent-island-tab-active' : '')});
+            tab.connect('clicked', () => { this._view = id; this._queueSync(); });
             tabs.add_child(tab);
+        }
+        top.add_child(tabs);
+        const quiet = !this._settings.get_boolean('show-banners');
+        const dnd = this._iconButton(quiet ? 'notifications-disabled-symbolic' : 'preferences-system-notifications-symbolic',
+            quiet ? 'Desactivar No molestar' : 'Activar No molestar', () => this._settings.set_boolean('show-banners', quiet));
+        if (quiet)
+            dnd.add_style_class_name('agent-island-dnd-active');
+        top.add_child(dnd);
+        this._body.add_child(top);
+        const scroll = new St.ScrollView({style_class: 'agent-island-scroll',
+            hscrollbar_policy: St.PolicyType.NEVER, vscrollbar_policy: St.PolicyType.AUTOMATIC,
+            overlay_scrollbars: false, x_expand: true});
+        this._content = new St.BoxLayout({vertical: true, style_class: 'agent-island-list', x_expand: true});
+        scroll.set_child(this._content);
+        this._body.add_child(scroll);
+        if (this._view === 'sessions')
+            this._fillSessionsView();
+        else if (this._view === 'music') {
+            if (this._media.player)
+                this._content.add_child(this._makeMediaRow(this._media.player));
+            else
+                this._empty('audio-x-generic-symbolic', 'Sin reproducción', 'Tu música aparecerá aquí.');
+        } else if (this._view === 'controls')
+            this._fillControlsView();
+        else if (this._view === 'settings')
+            this._fillRoutingView();
+        else
+            this._fillNotificationsView();
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const maxHeight = Math.min(420, ((Main.layoutManager.primaryMonitor?.height ?? 900) * 0.7) / scale - 180);
+        scroll.set_style(`max-height: ${Math.max(100, maxHeight)}px;`);
+        const bottom = new St.BoxLayout({style_class: 'agent-island-bottom'});
+        bottom.add_child(this._label(quiet ? 'No molestar activado' : this._notifications.notifications.length ? 'Notificaciones del sistema' : 'Estás al día', 'agent-island-footer-label'));
+        if (this._view === 'alerts' && this._notifications.notifications.length) {
+            const clear = new St.Button({label: 'Limpiar todo', style_class: 'agent-island-text-button', can_focus: true});
+            clear.connect('clicked', () => this._notifications.clear());
+            bottom.add_child(clear);
+        }
+        this._body.add_child(bottom);
+    }
+
+    _fillControlsView() {
+        const clean = this._preferences.get_boolean('clean-panel');
+        const toggle = new St.Button({label: clean ? 'Barra limpia: activada' : 'Barra limpia: desactivada',
+            style_class: 'agent-island-text-button', can_focus: true, x_align: Clutter.ActorAlign.END});
+        toggle.connect('clicked', () => {
+            this._preferences.set_boolean('clean-panel', !clean);
+            this._queueSync();
+        });
+        if (clean)
+            this._content.add_child(this._controls.actor);
+        this._content.add_child(toggle);
+    }
+
+    _fillRoutingView() {
+        const note = this._label('Elige dónde aparecen los avisos de cada app.', 'agent-island-row-sub', true);
+        this._content.add_child(note);
+        const routeRow = (title, current, change) => {
+            const row = new St.BoxLayout({style_class: 'agent-island-route-row'});
+            row.add_child(this._label(title, 'agent-island-row-title'));
+            for (const [route, label] of [['notch', 'Notch'], ['native', 'Normal']]) {
+                const button = new St.Button({label, can_focus: true, accessible_name: `${title}: ${label}`,
+                    style_class: 'agent-island-tab' + (route === current ? ' agent-island-tab-active' : '')});
+                button.connect('clicked', () => change(route));
+                row.add_child(button);
+            }
+            this._content.add_child(row);
         };
+        routeRow('Apps nuevas', this._notifications.defaultRoute, route => { this._notifications.defaultRoute = route; });
+        for (const app of this._notifications.applications)
+            routeRow(app.title, app.route, route => this._notifications.setRoute(app.id, route));
+        this._content.add_child(this._label('Las apps se añaden al enviar su primer aviso. No molestar se aplica a ambos destinos.', 'agent-island-row-sub', true));
+    }
 
-        const sessions = this._store.sessions.length;
-        const alerts = this._notifications.notifications.length;
-        addTab('sessions', sessions > 0 ? `Sessions ${sessions}` : 'Sessions');
-        addTab('alerts', alerts > 0 ? `Alerts ${alerts}` : 'Alerts');
-
-        return tabs;
+    _empty(icon, title, body) {
+        const box = new St.BoxLayout({vertical: true, style_class: 'agent-island-empty'});
+        box.add_child(new St.Icon({icon_name: icon, icon_size: 28, style_class: 'agent-island-empty-icon'}));
+        box.add_child(new St.Label({text: title, style_class: 'agent-island-empty-title', x_align: Clutter.ActorAlign.CENTER}));
+        box.add_child(new St.Label({text: body, style_class: 'agent-island-row-sub', x_align: Clutter.ActorAlign.CENTER}));
+        this._content.add_child(box);
     }
 
     _fillSessionsView() {
         const sessions = this._store.sessions;
-        if (sessions.length === 0) {
-            this._overlay.add_child(new St.Label({
-                style_class: 'agent-island-row-sub',
-                text: 'No active agent sessions',
-            }));
+        if (!sessions.length) {
+            this._empty('utilities-terminal-symbolic', 'Espacio para tus ideas', 'Tus agentes aparecerán aquí cuando trabajen.');
             return;
         }
-
-        // Busy sessions always show. Idle ones stay folded behind one quiet
-        // line; when nothing is busy we show the 3 freshest so the card is
-        // not empty, but it NEVER grows into a floor-length list again.
-        const busy = sessions.filter(s => s.state !== 'idle');
-        const idle = sessions.filter(s => s.state === 'idle');
-
-        for (const session of busy)
-            this._overlay.add_child(this._makeRow(session));
-
-        const visibleIdle = this._showIdle
-            ? idle
-            : (busy.length === 0 ? idle.slice(0, 3) : []);
-        for (const session of visibleIdle)
-            this._overlay.add_child(this._makeRow(session));
-
-        const hidden = idle.length - visibleIdle.length;
-        if (hidden > 0) {
-            const toggle = new St.Button({
-                style_class: 'agent-island-idle-toggle',
-                label: visibleIdle.length > 0
-                    ? `${hidden} more idle`
-                    : `${hidden} idle session${hidden > 1 ? 's' : ''}`,
-            });
-            toggle.connect('clicked', () => {
-                this._showIdle = true;
-                this._fillOverlay();
-            });
-            this._overlay.add_child(toggle);
-        }
+        for (const session of sessions)
+            this._content.add_child(this._makeRow(session));
     }
 
     _fillNotificationsView() {
         const notifications = this._notifications.notifications;
-        if (notifications.length === 0) {
-            this._overlay.add_child(new St.Label({
-                style_class: 'agent-island-row-sub',
-                text: 'No recent notifications',
-            }));
+        if (!notifications.length) {
+            this._empty('object-select-symbolic', 'Todo en calma', 'Tus próximas notificaciones llegarán a la isla.');
             return;
         }
-        for (const notification of notifications)
-            this._overlay.add_child(this._makeNotificationRow(notification));
+        const groups = this._notifications.groups;
+        const ids = new Set(groups.map(g => g.id));
+        for (const id of this._expandedGroups) {
+            if (!ids.has(id))
+                this._expandedGroups.delete(id);
+        }
+        for (const group of groups) {
+            const box = new St.BoxLayout({vertical: true, style_class: 'agent-island-notification-group'});
+            const expanded = this._expandedGroups.has(group.id);
+            if (group.items.length > 1) {
+                const header = new St.BoxLayout({style_class: 'agent-island-group-header'});
+                header.add_child(this._label(`${group.title} · ${group.items.length}`, 'agent-island-row-title'));
+                header.add_child(this._iconButton('window-close-symbolic', `Descartar avisos de ${group.title}`, () => {
+                    for (const notification of group.items)
+                        this._notifications.dismiss(notification);
+                }));
+                box.add_child(header);
+            }
+            for (const notification of expanded ? group.items : group.items.slice(0, 1))
+                box.add_child(this._makeNotificationRow(notification));
+            if (group.items.length > 1) {
+                const toggle = new St.Button({label: expanded ? 'Mostrar solo el último' : `Ver ${group.items.length - 1} anteriores`,
+                    accessible_name: `Agrupar ${group.title}`, style_class: 'agent-island-text-button', can_focus: true});
+                toggle.connect('clicked', () => {
+                    if (expanded)
+                        this._expandedGroups.delete(group.id);
+                    else
+                        this._expandedGroups.add(group.id);
+                    this._queueSync();
+                });
+                box.add_child(toggle);
+            }
+            this._content.add_child(box);
+        }
     }
 
-    // [app icon] [title + one line of body]                        [time]
-    // Clicking a notification activates it (opens the app), same as
-    // clicking it in the Shell's own notification list.
-    _makeNotificationRow(notification) {
-        const row = new St.BoxLayout({
-            style_class: 'agent-island-notif',
-            x_expand: true,
-            x_align: Clutter.ActorAlign.FILL,
-        });
-
-        row.add_child(new St.Icon({
-            style_class: 'agent-island-notif-icon',
-            gicon: notification.gicon,
-            fallback_icon_name: 'dialog-information-symbolic',
-            y_align: Clutter.ActorAlign.CENTER,
-        }));
-
-        const text = new St.BoxLayout({
-            style_class: 'agent-island-row-text',
-            vertical: true,
-            x_expand: true,
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        text.add_child(new St.Label({
-            style_class: 'agent-island-notif-title',
-            text: notification.title ?? '',
-        }));
-        const body = (notification.body ?? '').split('\n')[0];
-        text.add_child(new St.Label({
-            style_class: 'agent-island-row-sub',
-            text: body.length > 70 ? `${body.slice(0, 70)}…` : body,
-        }));
-        row.add_child(text);
-
-        row.add_child(new St.Label({
-            style_class: 'agent-island-notif-time',
-            text: timeAgo(notification.datetime.to_unix()),
-            y_align: Clutter.ActorAlign.CENTER,
-        }));
-
-        const button = new St.Button({
-            style_class: 'agent-island-notif-btn',
-            child: row,
-            x_expand: true,
-        });
-        button.connect('clicked', () => {
-            this._collapse();
-            notification.activate();
-        });
+    _iconButton(icon, title, callback) {
+        const button = new St.Button({style_class: 'agent-island-icon-button', can_focus: true,
+            accessible_name: title, child: new St.Icon({icon_name: icon, icon_size: 16})});
+        button.connect('clicked', callback);
         return button;
+    }
+
+    _makeNotificationRow(notification, preview = false) {
+        const card = new St.BoxLayout({vertical: true,
+            style_class: 'agent-island-notification' + (notification.urgency === Urgency.CRITICAL ? ' agent-island-critical' : '')});
+        const top = new St.BoxLayout({style_class: 'agent-island-notif-meta'});
+        top.add_child(this._label(notification.source.title, 'agent-island-app-name'));
+        top.add_child(new St.Label({text: timeAgo(notification.datetime.to_unix()), style_class: 'agent-island-notif-time', y_align: Clutter.ActorAlign.CENTER}));
+        top.add_child(this._iconButton('window-close-symbolic', 'Descartar notificación', () => this._notifications.dismiss(notification)));
+        card.add_child(top);
+        const row = new St.BoxLayout({style_class: 'agent-island-notif', x_expand: true});
+        row.add_child(new St.Icon({gicon: notification.gicon ?? notification.source.icon,
+            fallback_icon_name: 'dialog-information-symbolic', style_class: 'agent-island-notif-icon', y_align: Clutter.ActorAlign.START}));
+        const text = new St.BoxLayout({vertical: true, x_expand: true, style_class: 'agent-island-row-text'});
+        text.add_child(this._label(notification.title, 'agent-island-notif-title'));
+        const body = this._label(plainBody(notification), 'agent-island-notif-body', true);
+        body.clutter_text.set_single_line_mode(false);
+        body.set_style(`max-height: ${preview ? 72 : 100}px;`);
+        text.add_child(body);
+        row.add_child(text);
+        const open = new St.Button({child: row, style_class: 'agent-island-notif-btn', x_expand: true,
+            can_focus: true, accessible_name: `Abrir ${notification.source.title}: ${notification.title}`});
+        open.connect('clicked', () => { this._collapse(); notification.activate(); });
+        card.add_child(open);
+        if (notification.actions.length) {
+            const actions = new St.BoxLayout({style_class: 'agent-island-actions', x_expand: true});
+            for (const action of notification.actions) {
+                const button = new St.Button({child: this._label(action.label, 'agent-island-action-label'),
+                    style_class: 'agent-island-action', accessible_name: action.label, can_focus: true, x_expand: true});
+                button.connect('clicked', () => { this._collapse(); action.activate(); });
+                actions.add_child(button);
+            }
+            card.add_child(actions);
+        }
+        return card;
     }
 
     // [cover art] [track title + artists]        [prev] [play/pause] [next]
@@ -467,6 +564,8 @@ class Island extends PanelMenu.Button {
         // Cover art doubles as the "open the player app" button.
         const cover = new St.Button({
             style_class: 'agent-island-cover-btn',
+            can_focus: true,
+            accessible_name: 'Abrir reproductor',
             y_align: Clutter.ActorAlign.CENTER,
             child: new St.Icon({
                 style_class: 'agent-island-cover',
@@ -489,14 +588,8 @@ class Island extends PanelMenu.Button {
             x_expand: true,
             y_align: Clutter.ActorAlign.CENTER,
         });
-        text.add_child(new St.Label({
-            style_class: 'agent-island-media-title',
-            text: player.trackTitle,
-        }));
-        text.add_child(new St.Label({
-            style_class: 'agent-island-row-sub',
-            text: player.trackArtists.join(', '),
-        }));
+        text.add_child(this._label(player.trackTitle, 'agent-island-media-title'));
+        text.add_child(this._label(player.trackArtists.join(', '), 'agent-island-row-sub'));
         row.add_child(text);
 
         const controls = new St.BoxLayout({
@@ -507,6 +600,8 @@ class Island extends PanelMenu.Button {
             const button = new St.Button({
                 style_class: 'agent-island-media-btn',
                 reactive: sensitive,
+                can_focus: sensitive,
+                accessible_name: iconName,
                 child: new St.Icon({
                     style_class: 'agent-island-media-btn-icon',
                     icon_name: iconName,
@@ -555,7 +650,7 @@ class Island extends PanelMenu.Button {
         const avatarChild = iconFile?.query_exists(null)
             ? new St.Icon({
                 gicon: new Gio.FileIcon({file: iconFile}),
-                icon_size: 44,
+                icon_size: 36,
                 x_align: Clutter.ActorAlign.CENTER,
                 y_align: Clutter.ActorAlign.CENTER,
             })
@@ -583,16 +678,8 @@ class Island extends PanelMenu.Button {
         // hook captured one, else the session title, else the project.
         const headline = session.task || session.title ||
             project || meta.label;
-        text.add_child(new St.Label({
-            style_class: 'agent-island-row-title',
-            text: headline.length > 48
-                ? `${headline.slice(0, 48)}…` : headline,
-        }));
-        text.add_child(new St.Label({
-            style_class: 'agent-island-row-sub',
-            text: [project, meta.label, timeAgo(session.ts)]
-                .filter(part => part).join(' · '),
-        }));
+        text.add_child(this._label(headline, 'agent-island-row-title'));
+        text.add_child(this._label([project, meta.label, timeAgo(session.ts)].filter(Boolean).join(' · '), 'agent-island-row-sub'));
         row.add_child(text);
 
         const chip = new St.BoxLayout({
@@ -606,13 +693,14 @@ class Island extends PanelMenu.Button {
             y_align: Clutter.ActorAlign.CENTER,
         }));
         chip.add_child(new St.Label({
-            text: STATE_LABEL[session.state],
+            text: session.statusLabel || STATE_LABEL[session.state],
             y_align: Clutter.ActorAlign.CENTER,
         }));
         row.add_child(chip);
 
         const button = new St.Button({
             style_class: 'agent-island-notif-btn',
+            can_focus: true,
             child: row,
             x_expand: true,
         });
@@ -626,6 +714,15 @@ class Island extends PanelMenu.Button {
     // Hook metadata identifies the terminal or tmux pane deterministically.
     // Older state files still work through the project-name title fallback.
     _focusSessionWindow(session) {
+        if (session.agent === 'codex-desktop' && /^[0-9a-f-]{36}$/i.test(session.sessionId)) {
+            try {
+                Gio.AppInfo.launch_default_for_uri(`codex://threads/${session.sessionId}`,
+                    global.create_app_launch_context(0, -1));
+            } catch (error) {
+                console.warn(`Agent Island: cannot open Codex task: ${error.message}`);
+            }
+            return;
+        }
         const windows =
             global.display.get_tab_list(Meta.TabList.NORMAL, null);
         const project =
@@ -738,55 +835,68 @@ class Island extends PanelMenu.Button {
         }
     }
 
-    // True notch: the card starts at the very top edge of the screen and
-    // covers its slice of the bar (top chrome stacks above the panel), so
-    // no theme margin or panel styling can leave a colored seam. Always
-    // dead-centered on the monitor, like the real thing; this runs again
-    // on every content change, so it stays centered as the card resizes.
-    _positionOverlay() {
-        const monitor = Main.layoutManager.primaryMonitor;
-        const [, width] = this._overlay.get_preferred_width(-1);
-        const x = monitor.x + Math.round((monitor.width - width) / 2);
-        this._overlay.set_position(x, monitor.y);
+    _syncVisibility() {
+        // A critical/feedback banner is eligible even over fullscreen apps.
+        const fullscreen = Main.layoutManager.primaryMonitor?.inFullscreen;
+        const visible = !fullscreen || this._expanded ||
+            this._preview?.urgency === Urgency.CRITICAL || !!this._preview?.forFeedback;
+        this._surface.visible = visible;
+        this._spectrum?.setActive(!!visible && this._media.player?.status === 'Playing' && !this._preview && !this._expanded);
+        this._ears?.forEach(ear => { ear.visible = visible; });
     }
 
-    // Is the stage point (x, y) inside this actor?
-    _contains(actor, x, y) {
-        const [ax, ay] = actor.get_transformed_position();
-        const [width, height] = actor.get_transformed_size();
-        return x >= ax && x <= ax + width && y >= ay && y <= ay + height;
+    _positionOverlay() {
+        const monitor = Main.layoutManager.primaryMonitor;
+        if (!monitor || !this._surface)
+            return;
+        const x = monitor.x + Math.round((monitor.width - this._surface.width) / 2);
+        this._surface.set_position(x, monitor.y);
+        if (this._ears) {
+            this._ears[0].set_position(x - this._ears[0].width, monitor.y);
+            this._ears[1].set_position(x + this._surface.width, monitor.y);
+        }
     }
 
     _onIslandDestroyed() {
-        if (this._autoExpandId) {
-            GLib.source_remove(this._autoExpandId);
-            this._autoExpandId = 0;
+        for (const key of ['_syncId', '_previewId', '_autoExpandId']) {
+            if (this[key])
+                GLib.source_remove(this[key]);
+            this[key] = 0;
         }
-        if (this._grab) {
+        if (this._grab)
             Main.popModal(this._grab);
-            this._grab = null;
-        }
-        if (this._stagePressHandler) {
-            global.stage.disconnect(this._stagePressHandler);
-            this._stagePressHandler = 0;
-        }
-        // Destroy the overlay immediately (no animation): we may be inside
-        // the extension's disable() and must leave nothing behind.
-        if (this._overlay) {
-            this._overlay.destroy();
-            this._overlay = null;
-        }
-        this._store = null;
-        this._media = null;
-        this._notifications = null;
+        this._grab = null;
+        this._spectrum?.destroy();
+        this._spectrumBars = [];
+        this._controls?.destroy();
+        this._controls = null;
+        this._settings.disconnect(this._settingsId);
+        this._settings = null;
+        this._surface.destroy();
+        this._surface = null;
+        this._ears.forEach(ear => ear.destroy());
+        this._pending = [];
+        this._preview = null;
     }
 });
+
+function plainBody(notification) {
+    const body = notification.body ?? '';
+    if (!notification.useBodyMarkup)
+        return body;
+    try {
+        const [, , text] = Pango.parse_markup(body, -1, '\0');
+        return text;
+    } catch {
+        return body.replace(/<[^>]*>/g, '');
+    }
+}
 
 function timeAgo(ts) {
     const seconds = Math.max(0, GLib.get_real_time() / 1e6 - ts);
     if (seconds < 60)
-        return 'just now';
+        return 'ahora';
     if (seconds < 3600)
-        return `${Math.floor(seconds / 60)}m ago`;
-    return `${Math.floor(seconds / 3600)}h ago`;
+        return `hace ${Math.floor(seconds / 60)} min`;
+    return `hace ${Math.floor(seconds / 3600)} h`;
 }

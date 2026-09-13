@@ -23,12 +23,12 @@ import {Island} from './island.js';
 
 export default class AgentIslandExtension extends Extension {
     enable() {
-        this._store = new SessionStore();
+        this._store = new SessionStore(this.path);
         this._media = new MediaWatcher();
-        this._notifications = new NotificationWatcher();
+        this._notifications = new NotificationWatcher(this.getSettings());
 
         this._island = new Island(
-            this._store, this._media, this._notifications, this.path);
+            this._store, this._media, this._notifications, this.path, this.getSettings());
 
         // 'agentIsland' is our role name in the panel's status area.
         // Position 0 in the 'center' box = leftmost slot of the center.

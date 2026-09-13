@@ -1,3 +1,8 @@
 *.bak
 *~
 progreso.md
+
+dev/artifacts/
+extension/schemas/gschemas.compiled
+
+__pycache__/

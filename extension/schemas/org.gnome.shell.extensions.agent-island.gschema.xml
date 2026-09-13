@@ -1,0 +1,8 @@
+<schemalist>
+  <schema id="org.gnome.shell.extensions.agent-island" path="/org/gnome/shell/extensions/agent-island/">
+    <key name="clean-panel" type="b"><default>true</default><summary>Move extra panel indicators into the notch controls</summary></key>
+    <key name="default-route" type="s"><default>'notch'</default><choices><choice value="notch"/><choice value="native"/></choices><summary>Default notification presentation</summary></key>
+    <key name="app-routes" type="a{ss}"><default>{}</default><summary>Presentation overrides by application</summary></key>
+    <key name="known-apps" type="a{ss}"><default>{}</default><summary>Applications that have sent notifications</summary></key>
+  </schema>
+</schemalist>

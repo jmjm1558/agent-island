@@ -1,241 +1,96 @@
-/* Agent Island styles.
- *
- * GNOME Shell's St toolkit understands a CSS subset; everything used here
- * (width/height on plain widgets, border-radius, spacing on box layouts)
- * is also used by the Shell's own theme, so it is safe.
- *
- * Look: iPhone Dynamic Island. True black pill and card, big radii,
- * white titles, gray subtitles, state shown as tinted chips. The island
- * draws its own background, so it looks the same on any Shell theme. */
-
-/* ---- collapsed pill (lives inside the top bar) ---- */
-
-.agent-island-pill {
-    background-color: rgba(0, 0, 0, 0.9);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 99px;
-    padding: 4px 12px;
-    spacing: 5px;
+/* A true black cutout, with concave shoulders drawn by island.js. */
+.agent-island-surface {
+    background-color: #000;
+    border-radius: 0 0 24px 24px;
+    color: #f5f5f7;
+    font-family: Inter, Cantarell, sans-serif;
 }
+.agent-island-header { padding: 0 18px; border-radius: 0 0 18px 18px; }
+.agent-island-header:hover { background-color: #101012; }
+.agent-island-header:focus { box-shadow: inset 0 0 0 1px #86868b; }
+.agent-island-pill { spacing: 10px; }
+.agent-island-pill-title { font-size: 9pt; font-weight: 600; color: #e8e8ed; }
+.agent-island-status-icon { icon-size: 13px; color: #a1a1aa; }
+.agent-island-dot { width: 6px; height: 6px; border-radius: 99px; }
+.agent-island-dot-working { background-color: #7ee2aa; }
+.agent-island-dot-waiting { background-color: #ffc16e; }
+.agent-island-dot-idle { background-color: #797982; }
+.agent-island-count { font-size: 8pt; font-weight: bold; color: #b4b4be; }
+.agent-island-wave { spacing: 2px; height: 20px; }
+.agent-island-wave-bar { width: 3px; border-radius: 2px; background-color: #a6b7ff; }
+.agent-island-body { padding: 6px 16px 12px; spacing: 8px; }
+.agent-island-toolbar { spacing: 8px; }
+.agent-island-tabs { spacing: 4px; }
+.agent-island-tab { border-radius: 12px; padding: 8px 8px; font-size: 9pt; color: #92929d; }
+.agent-island-tab-active { background-color: #222226; color: #f5f5f7; font-weight: bold; }
+.agent-island-tab:hover, .agent-island-icon-button:hover,
+.agent-island-media-btn:hover, .agent-island-text-button:hover,
+.agent-island-idle-toggle:hover { background-color: #2b2b30; color: #fff; }
+.agent-island-tab:focus, .agent-island-icon-button:focus,
+.agent-island-notif-btn:focus, .agent-island-action:focus,
+.agent-island-text-button:focus, .agent-island-media-btn:focus,
+.agent-island-cover-btn:focus, .agent-island-idle-toggle:focus { box-shadow: inset 0 0 0 1px #9eafff; }
+.agent-island-icon-button { border-radius: 10px; padding: 6px; color: #92929d; }
+.agent-island-dnd-active { background-color: #262239; color: #c6b2ff; }
+.agent-island-list { spacing: 8px; }
+.agent-island-notification { background-color: #151517; border-radius: 16px; padding: 7px 10px 10px; spacing: 3px; }
+.agent-island-critical { border: 1px solid #9a6330; }
+.agent-island-notif-meta { spacing: 8px; }
+.agent-island-app-name { color: #a1a1aa; font-size: 8pt; font-weight: 600; }
+.agent-island-notif-time { color: #81818b; font-size: 8pt; }
+.agent-island-notif { padding: 3px; spacing: 12px; }
+.agent-island-notif-btn { border-radius: 10px; }
+.agent-island-notif-btn:hover { background-color: #222226; }
+.agent-island-notif-icon { icon-size: 36px; }
+.agent-island-notif-title { color: #fafafa; font-size: 11pt; font-weight: bold; }
+.agent-island-notif-body { color: #b7b7c1; font-size: 10pt; }
+.agent-island-row-text { spacing: 4px; }
+.agent-island-actions { spacing: 6px; padding-top: 8px; }
+.agent-island-action { border-radius: 10px; padding: 8px 12px; background-color: #303038; }
+.agent-island-action:hover { background-color: #42424d; }
+.agent-island-action-label { font-size: 9pt; font-weight: 600; color: #e8e9ff; }
+.agent-island-bottom, .agent-island-preview-footer { spacing: 8px; padding: 2px 3px 0; }
+.agent-island-footer-label { color: #898994; font-size: 8pt; }
+.agent-island-text-button { font-size: 8pt; color: #bac5ff; border-radius: 8px; padding: 5px 8px; }
+.agent-island-empty { padding: 30px 4px; spacing: 10px; }
+.agent-island-empty-icon { color: #7ee2aa; margin-bottom: 4px; }
+.agent-island-empty-title { color: #e8e8ed; font-weight: bold; font-size: 12pt; }
+.agent-island-media { background-color: #141416; border-radius: 16px; padding: 12px; spacing: 12px; }
+.agent-island-cover-btn { border-radius: 12px; padding: 0; }
+.agent-island-cover { icon-size: 48px; border-radius: 12px; }
+.agent-island-media-title { font-size: 11pt; font-weight: bold; color: #fff; }
+.agent-island-media-controls { spacing: 2px; }
+.agent-island-media-btn { border-radius: 99px; padding: 7px; }
+.agent-island-media-btn:insensitive { color: #555; }
+.agent-island-media-btn-icon { icon-size: 16px; }
+.agent-island-separator { height: 1px; background-color: #202024; margin: 2px 0; }
+.agent-island-row { padding: 10px 6px; spacing: 10px; }
+.agent-island-avatar { width: 36px; height: 36px; border-radius: 10px; background-color: #292930; color: #fff; font-size: 14pt; font-weight: bold; }
+.agent-island-avatar-claude-code, .agent-island-avatar-codex { background-color: transparent; }
+.agent-island-row-title { color: #f5f5f7; font-size: 10pt; font-weight: bold; }
+.agent-island-row-sub { color: #93939e; font-size: 9pt; }
+.agent-island-chip { border-radius: 99px; padding: 4px 8px; spacing: 5px; font-size: 8pt; }
+.agent-island-chip-dot { width: 5px; height: 5px; border-radius: 99px; }
+.agent-island-chip-working { color: #7ee2aa; background-color: rgba(126, 226, 170, 0.12); }
+.agent-island-chip-waiting { color: #ffc16e; background-color: rgba(255, 193, 110, 0.12); }
+.agent-island-chip-idle { color: #a1a1aa; background-color: #242428; }
+.agent-island-idle-toggle { padding: 8px; border-radius: 10px; font-size: 9pt; color: #92929d; }
+.agent-island-route-row { padding: 8px 2px; spacing: 5px; }
+.agent-island-avatar-codex-desktop { background-color: transparent; }
 
-.agent-island-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 99px;
-}
+.agent-island-controls { spacing: 10px; }
 
-.agent-island-dot-working { background-color: #9ece6a; }
-.agent-island-dot-waiting { background-color: #e0af68; }
-.agent-island-dot-idle    { background-color: #565f89; }
-.agent-island-dot-empty   { background-color: rgba(255, 255, 255, 0.25); }
+.agent-island-controls .system-status-icon { icon-size: 16px; padding: 0 4px; }
+.agent-island-controls .panel-button { -natural-hpadding: 6px; -minimum-hpadding: 4px; padding: 6px; color: #f5f5f7; font-size: 10pt; }
+.agent-island-controls .panel-button:hover { background-color: #303038; border-radius: 8px; }
 
-.agent-island-more {
-    font-size: 8pt;
-    color: #9aa5ce;
-}
+/* Reserve a real gutter even under themes that style overlay scrollbars. */
+.agent-island-scroll StScrollBar { width: 7px; padding-left: 5px; }
+.agent-island-scroll .agent-island-list { padding-right: 10px; }
+.agent-island-controls { background-color: #161619; border-radius: 16px; padding: 12px; spacing: 12px; }
+.agent-island-control-wide { spacing: 6px; }
+.agent-island-control-shortcut { min-width: 42px; min-height: 38px; margin-right: 8px; border-radius: 10px; background-color: #25252a; }
+.agent-island-control-shortcut:hover { background-color: #36363d; }
 
-.agent-island-pill-music {
-    icon-size: 11px;
-    color: #bb9af7;
-}
-
-.agent-island-pill-notif {
-    font-size: 8pt;
-    font-weight: bold;
-    color: #e0af68;
-}
-
-/* ---- expanded card (floats below the bar) ---- */
-
-/* Fused with the bar, macOS-notch style: solid black (it covers its slice
- * of the bar, so nothing may shine through), square top corners, no top
- * border; the extension positions it at the very top edge of the screen
- * and content starts right away - no dead space. */
-.agent-island-overlay {
-    background-color: #000000;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top-width: 0px;
-    border-radius: 0 0 26px 26px;
-    padding: 10px 18px 14px 18px;
-    min-width: 380px;
-    spacing: 6px;
-    color: #ffffff;
-}
-
-.agent-island-row {
-    padding: 6px 2px;
-    spacing: 12px;
-}
-
-/* ---- media row (NotchNook style: art, track, controls) ---- */
-
-.agent-island-media {
-    padding: 4px 2px;
-    spacing: 12px;
-}
-
-.agent-island-cover-btn {
-    border-radius: 12px;
-    padding: 0px;
-}
-
-.agent-island-cover {
-    icon-size: 48px;
-    border-radius: 12px;
-}
-
-.agent-island-media-title {
-    font-size: 11.5pt;
-    font-weight: bold;
-    color: #ffffff;
-}
-
-.agent-island-media-controls {
-    spacing: 2px;
-}
-
-.agent-island-media-btn {
-    border-radius: 99px;
-    padding: 8px;
-}
-
-.agent-island-media-btn:hover {
-    background-color: rgba(255, 255, 255, 0.12);
-}
-
-.agent-island-media-btn-icon {
-    icon-size: 16px;
-    color: #ffffff;
-}
-
-.agent-island-separator {
-    height: 1px;
-    background-color: rgba(255, 255, 255, 0.08);
-    margin: 6px 0px;
-}
-
-/* ---- view switcher chips (the NotchNook "Nook | Tray" pattern) ---- */
-
-.agent-island-tabs {
-    spacing: 6px;
-    padding: 2px 0px 6px 0px;
-}
-
-.agent-island-tab {
-    border-radius: 99px;
-    padding: 3px 12px;
-    font-size: 8.5pt;
-    color: #9aa5ce;
-}
-
-.agent-island-tab:hover {
-    background-color: rgba(255, 255, 255, 0.06);
-}
-
-.agent-island-tab-active {
-    background-color: rgba(255, 255, 255, 0.12);
-    color: #ffffff;
-    font-weight: bold;
-}
-
-.agent-island-idle-toggle {
-    border-radius: 10px;
-    padding: 6px;
-    font-size: 9pt;
-    color: #9aa5ce;
-}
-
-.agent-island-idle-toggle:hover {
-    background-color: rgba(255, 255, 255, 0.06);
-}
-
-/* ---- notification rows ---- */
-
-.agent-island-notif-btn {
-    border-radius: 12px;
-}
-
-.agent-island-notif-btn:hover {
-    background-color: rgba(255, 255, 255, 0.06);
-}
-
-.agent-island-notif {
-    padding: 5px 4px;
-    spacing: 10px;
-}
-
-.agent-island-notif-icon {
-    icon-size: 22px;
-}
-
-.agent-island-notif-title {
-    font-size: 10.5pt;
-    font-weight: bold;
-    color: #ffffff;
-}
-
-.agent-island-notif-time {
-    font-size: 8pt;
-    color: #565f89;
-}
-
-/* Known agents fill this square with their bundled icon. The text styling
- * remains for the initial shown by unknown agents. */
-.agent-island-avatar {
-    width: 44px;
-    height: 44px;
-    border-radius: 14px;
-    background-color: #3b4261;
-    color: #ffffff;
-    font-weight: bold;
-    font-size: 14pt;
-}
-
-.agent-island-avatar-claude-code,
-.agent-island-avatar-codex {
-    background-color: transparent;
-}
-
-.agent-island-row-text {
-    spacing: 1px;
-}
-
-.agent-island-row-title {
-    font-size: 11.5pt;
-    font-weight: bold;
-    color: #ffffff;
-}
-
-.agent-island-row-sub {
-    font-size: 9pt;
-    color: #9aa5ce;
-}
-
-/* State chip: small tinted pill on the right of each row. */
-.agent-island-chip {
-    border-radius: 99px;
-    padding: 3px 10px;
-    spacing: 6px;
-    font-size: 8.5pt;
-}
-
-.agent-island-chip-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 99px;
-}
-
-.agent-island-chip-working {
-    color: #9ece6a;
-    background-color: rgba(158, 206, 106, 0.13);
-}
-
-.agent-island-chip-waiting {
-    color: #e0af68;
-    background-color: rgba(224, 175, 104, 0.15);
-}
-
-.agent-island-chip-idle {
-    color: #9aa5ce;
-    background-color: rgba(154, 165, 206, 0.12);
-}
+.agent-island-notification-group { spacing: 5px; }
+.agent-island-group-header { padding: 2px 6px; spacing: 8px; }
