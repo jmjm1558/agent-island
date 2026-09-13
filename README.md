@@ -1,79 +1,58 @@
 # Agent Island
 
-A **Dynamic Island for GNOME Shell**: a pill in the middle of the top bar
-(where the clock used to be) showing, in real time, every AI coding agent
-session running on your machine — Claude Code and Codex today. Click it and
-it unfolds into an iPhone-style card.
+*[Español](README.es.md)*
 
-![Expanded island showing three live sessions](docs/img/island-expanded.png)
+A black, top-edge notch for GNOME Shell 46, with animated previews and a compact desktop hub.
 
-Collapsed, it is one dot per session, colored by state:
+![Closed notch](docs/img/notch-pill.png)
 
-![Collapsed pill](docs/img/island-pill.png)
+- **Notifications:** normal previews last 2.5 seconds, pause on hover, and history groups notices by application with expandable originals. Replace native banners with notch previews, retain original actions and dismissal, and select **Notch** or **Normal** per app in **Ajustes**. New apps appear after their first notification. GNOME still controls Do Not Disturb, urgency and application permissions. History follows GNOME notification lifetime; it is not an archive.
+- **Sessions:** real Codex Desktop tasks and terminal agents used in the last 30 minutes, plus verified working/waiting sessions. Opening a context renews its visibility; archived history stays out of the notch. Desktop tasks open through their exact `codex://threads/<id>` URI. Terminal sessions use process identity and the existing exact terminal/tmux navigation.
+- **Controls:** native system and extension indicators move into **Controles**, including a compact app-icon grid, resource monitor and clipboard when installed. Battery, Wi-Fi and sound remain at the top right. **Barra limpia** restores the original panel arrangement. Recording/sharing, accessibility and keyboard indicators remain in the panel.
+- **Media:** a dedicated Música section contains MPRIS artwork, track information, previous/play/next and a twelve-band spectrum driven by actual playback audio, with fast attack and smooth release. It reads the playback monitor only while the spectrum is visible, keeps no audio files, and stops when the player closes.
 
-| Color | State | Meaning |
-|-------|-------|---------|
-| 🟢 green (pulsing) | `working` | the agent is doing things |
-| 🟠 amber | `waiting` | **the agent needs you** (permission, input) |
-| ⚪ gray | `idle` | finished, waiting for your next prompt |
+The closed notch matches the panel height, leaving application tabs unobstructed. The clock moves left. Opening the notch takes focus; automatic previews do not. Click outside or press Escape to close. Disabling restores the clock, controls and native notification presentation.
 
-The expanded card is a notch hub, not just an agent list:
+## Screenshots
 
-- **Jump to session**: click an agent row to focus its terminal. Sessions
-  managed by tmux select the exact pane; detached aoe sessions open a
-  terminal already attached to the right session.
-- **Now playing** (MPRIS: Spotify, browsers, mpv...): cover art, track info
-  and prev/play/next controls above the sessions; the pill shows a small
-  note while something plays. If you run another music pill extension you
-  will see music twice; disable one.
-- **Notifications**: the most recent desktop notifications (Telegram,
-  WhatsApp/YouTube/mail via their apps or browser) below the sessions, with
-  app icon, message preview and age; click one to open it. The pill shows
-  an amber count while any are present. The island only mirrors the Shell's
-  message tray - it never swallows or dismisses anything.
+| Avisos | Sesiones |
+|---|---|
+| ![Avisos tab, grouped notifications](docs/img/notch-avisos.png) | ![Sesiones tab, scrollable list](docs/img/notch-sesiones.png) |
 
-The clock is moved to the left side of the bar so the island can live in the
-center. Disabling the extension puts everything back.
+| Controles | Música |
+|---|---|
+| ![Controles tab, resource monitor and shortcuts](docs/img/notch-controles.png) | ![Música tab, MPRIS controls](docs/img/notch-musica.png) |
 
-## How it works
+| Ajustes | Pill with the spectrum |
+|---|---|
+| ![Ajustes tab, per-app notification routing](docs/img/notch-ajustes.png) | ![Closed pill showing the playback spectrum next to the track title](docs/img/notch-spectrum.png) |
 
-No polling, no Agent Island daemon, no custom socket. Three small pieces:
+## Session data
 
-```
-Claude Code ──┐  lifecycle hooks        ┌────────────────────────────┐
-              ├──── write one JSON ────▶│ $XDG_RUNTIME_DIR/agent-    │
-Codex ────────┘  file per session       │ island/<agent>-<id>.json   │
-                                        └─────────────┬──────────────┘
-                                                      │ inotify (Gio.FileMonitor)
-                                        ┌─────────────▼──────────────┐
-                                        │ GNOME Shell extension:     │
-                                        │ pill + expandable card     │
-                                        └────────────────────────────┘
-```
+Terminal hooks atomically write JSON to `$XDG_RUNTIME_DIR/agent-island/`, watched through `Gio.FileMonitor`. A 15-second process check removes dead agents. Unverified legacy files are hidden until a current hook event supplies process identity. See [the protocol](docs/protocol.md).
 
-- Both Claude Code and Codex expose **lifecycle hooks** with the same JSON
-  schema. A shared shell adapter ([hooks/agent-island-hook.sh](hooks/agent-island-hook.sh))
-  maps hook events to a session state, captures a terminal PID or exact tmux
-  target when available, and writes the result atomically to a tmpfs file.
-- The extension watches that directory with a file monitor, so state changes
-  are pushed to the UI. Zero CPU cost while nothing happens. Clicking a row
-  uses the captured target, with window-title matching only as a compatibility
-  fallback for older state files.
-- The state dir lives in `$XDG_RUNTIME_DIR` (memory-backed, per-user, wiped
-  on logout), so dead sessions cannot survive a reboot.
+Codex Desktop uses a Python child process owned by the extension, a read-only SQLite task catalog and the local desktop IPC stream. Only task metadata reaches the Shell. Active status comes from runtime events, never from file modification times. Unavailable live status is labeled **Reciente**; a disconnect clears stale active states. Duplicate desktop/terminal task IDs are merged.
 
-Any other agent can join by writing the same file format — see
-[docs/protocol.md](docs/protocol.md).
+The desktop IPC is an internal interface verified against the installed Codex Desktop 26.909. Unknown versions fall back to recent tasks instead of guessing activity. This integration may require maintenance after Codex upgrades. The extension does not install a background service.
 
-## Install
+## Install on Ubuntu
 
-Requirements: GNOME Shell 45/46 (developed on Ubuntu 24.04, Wayland), `jq`.
+Tested on Ubuntu 24.04 (GNOME Shell 46, Wayland). Python 3, `glib-compile-schemas` and the audio stack ship with the desktop; only `git` and `jq` usually need installing:
 
 ```bash
+sudo apt install git jq
 git clone https://github.com/jmjm1558/agent-island.git
 cd agent-island
 ./install.sh --claude --codex   # flags are optional and idempotent
 ```
+
+The spectrum bars in the Música tab are optional and need one more package for the FFT (`libpulse-simple.so.0` already ships with Ubuntu's audio stack):
+
+```bash
+sudo apt install libfftw3-single3
+```
+
+Without it the bars just stay flat; nothing else in the extension depends on it. For Fedora, Arch and other distros, see [Other distros](#other-distros) below.
 
 - `./install.sh` symlinks the extension into `~/.local/share/gnome-shell/extensions/`.
 - `--claude` registers the hooks in `~/.claude/settings.json` (backup kept).
@@ -97,63 +76,70 @@ rm ~/.local/share/gnome-shell/extensions/agent-island@jmjm1558.github.io
 Then remove the `agent-island-hook.sh` entries from `~/.claude/settings.json`
 and `~/.codex/hooks.json` (or restore the `.bak` backups the installer made).
 
-## Development
+## Other distros
 
-You do not need to log out to hack on this. Run a disposable nested shell:
+Nothing here is Ubuntu-specific: the extension is plain GJS against the
+standard GNOME Shell API, the hooks are POSIX shell plus `jq`, and the two
+Python helpers use only the standard library plus two runtime libraries
+loaded with `ctypes`. `jq`, `python3`, `glib-compile-schemas` and
+`gnome-extensions` ship with any distro's GNOME desktop group, and
+`install.sh` needs no sudo and touches only `$HOME`. Two things do not
+travel automatically, though:
+
+- **GNOME Shell version.** `extension/metadata.json` declares
+  `"shell-version": ["46"]`; Shell refuses to load an extension outside its
+  declared major version. Fedora 40 and openSUSE Tumbleweed ship 46
+  alongside Ubuntu 24.04, but a rolling distro that has since moved past it
+  needs its running version added to that array — and the panel/notification
+  internals this extension reaches into (`Main.panel.statusArea`,
+  `Main.layoutManager.addTopChrome`, message-tray banners) have changed
+  enough between Shell releases before that adding the version number only
+  gets it to load, not proof it still behaves.
+- **The spectrum's two `ctypes` libraries.** `libpulse.so.0` /
+  `libpulse-simple.so.0` ship with any PulseAudio or PipeWire-with-pulse-shim
+  install (i.e. essentially any GNOME desktop), but `libfftw3f.so.3` is not
+  preinstalled anywhere and needs an explicit package: `libfftw3-single3` on
+  Debian/Ubuntu, `fftw-libs-single` on Fedora, `fftw` on Arch (ships every
+  precision in one package). Missing either just leaves the spectrum bars
+  flat; nothing else in the extension depends on them.
+
+Two things are intentionally not portable, on any distro: the Codex bridge
+(`codex_bridge.py`) reads a specific Codex Desktop SQLite schema and IPC
+protocol version (`STREAM_VERSION = 11`, pinned to Codex Desktop 26.909) and
+falls back to "Reciente" on any other version rather than guessing activity;
+and `extension/spectrum.js` launches its helper at the literal path
+`/usr/bin/python3`, which is absent on non-FHS setups (e.g. NixOS) even when
+`python3` resolves fine on `$PATH`.
+
+## Development and verification
 
 ```bash
-./dev/run-nested.sh
+python3 dev/run-tests.py
+python3 dev/test-codex-bridge.py
+python3 dev/test-controls.py
+python3 dev/test-spectrum.py
+python3 dev/test-layout.py
 ```
 
-It opens a window with a full GNOME Shell (your real config and extensions,
-private D-Bus) with Agent Island enabled. Useful extras:
+The UI suite starts a disposable GNOME compositor with its own D-Bus, runtime, settings and extensions. It exercises actual pointer clicks and notification D-Bus actions. Portals and input-method helpers are excluded. Screenshots and logs go to ignored `dev/artifacts/`. `--interactive` keeps that private compositor alive for inspection.
 
-- `AGENT_ISLAND_AUTOEXPAND=1 ./dev/run-nested.sh` — the island expands by
-  itself after 1.5 s (you cannot script clicks inside a nested compositor).
-- `gjs -m dev/screenshot.js out.png` — run *inside* the nested session to
-  capture evidence screenshots (see the file for the D-Bus trick it uses).
-- Fake a session without any agent:
+The controls suite also loads the installed resource monitor and clipboard code with private settings, and checks process liveness. The spectrum suite sends test audio through a temporary silent sink on the actual sound server and verifies the notch response, silence and cleanup. It removes the sink afterward without changing the default device.
 
-  ```bash
-  D=$XDG_RUNTIME_DIR/agent-island; mkdir -p $D
-  printf '{"agent":"claude-code","state":"waiting","cwd":"%s","ts":%s}' \
-      "$PWD" "$(date +%s)" > $D/claude-code-fake.json   # island updates live
-  rm $D/claude-code-fake.json                            # and shrinks back
-  ```
+The bridge suite covers SQLite filtering, IPC snapshots and patches, approval state, unsupported protocols and disconnect recovery. It uses a local fixture server. Real desktop stream status was also checked during development; final interaction with the user's installed extensions requires loading the new JavaScript in their desktop session.
 
-### Project layout
+On Wayland, log out and back in to load modified extension JavaScript. Toggling the extension alone does not reliably reload imported modules.
 
-```
-extension/            the GNOME Shell extension (what gets symlinked)
-  extension.js        entry point: enable/disable + clock relocation
-  sessions.js         SessionStore: watches the state dir, no polling
-  media.js            MediaWatcher: MPRIS players via the Shell's own wrapper
-  notifications.js    NotificationWatcher: mirrors the Shell's message tray
-  island.js           the pill + the expandable card
-  stylesheet.css      all the looks (iPhone-style black, big radii)
-hooks/
-  agent-island-hook.sh    shared Claude Code / Codex adapter (stdin JSON -> state file)
-  claude-code.hooks.json  hook registration snippet for ~/.claude/settings.json
-  codex.hooks.json        hook registration snippet for ~/.codex/hooks.json
-dev/                  nested-shell test harness
-docs/                 protocol spec + screenshots
-install.sh            symlink + optional hook registration (idempotent)
-```
+## Layout
 
-## Roadmap
-
-- [x] Media module in the expanded card (MPRIS: art, title, controls)
-- [x] Notification peek: recent notifications inside the card
-- [x] Click-to-session navigation, including exact tmux pane selection
-- [ ] Live-activity chips inline in the pill (e.g. "needs input" text, not
-      just a dot)
-- [ ] More agents (Gemini CLI, Aider) — contributions welcome, it is one
-      JSON file (see [docs/protocol.md](docs/protocol.md))
-- [ ] Preferences UI (position, which modules, stale timeout)
-- [ ] Submission to extensions.gnome.org
+- `extension/island.js`, `stylesheet.css`: notch and views.
+- `extension/controls.js`: reversible native indicator relocation.
+- `extension/notifications.js`, `schemas/`: routing and persisted preferences.
+- `extension/sessions.js`, `codex_bridge.py`: verified terminal processes and desktop tasks.
+- `extension/media.js`: MPRIS integration.
+- `extension/spectrum.js`, `audio_spectrum.py`: playback-monitor FFT and smooth bar updates.
+- `hooks/agent-island-hook.sh`: shared terminal hook adapter.
+- `dev/`: isolated UI and bridge tests.
 
 ## License
 
-GPL-2.0-or-later (see [LICENSE](LICENSE)). GNOME Shell is GPL-2.0-or-later
-and extensions.gnome.org requires extensions to be distributed under
-compatible terms, so forks must keep this license.
+GPL-2.0-or-later. See [LICENSE](LICENSE).
