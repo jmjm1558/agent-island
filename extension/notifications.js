@@ -44,7 +44,11 @@ export class NotificationWatcher extends Signals.EventEmitter {
 
     get applications() {
         const apps = this._settings.get_value('known-apps').deepUnpack();
-        return Object.entries(apps).map(([id, title]) => ({id, title, route: this.routeForId(id)}))
+        const routes = this._settings.get_value('app-routes').deepUnpack();
+        const icons = this._settings.get_value('app-icons').deepUnpack();
+        return Object.entries(apps)
+            .map(([id, title]) => ({id, title, route: this.routeForId(id),
+                configured: id in routes, icon: icons[id] ?? null}))
             .sort((a, b) => a.title.localeCompare(b.title));
     }
 
@@ -144,6 +148,16 @@ export class NotificationWatcher extends Signals.EventEmitter {
             if (apps[key] !== source.title) {
                 apps[key] = source.title;
                 this._settings.set_value('known-apps', new GLib.Variant('a{ss}', apps));
+            }
+            // Keep whatever icon GNOME itself resolved, so the routing list can
+            // show it even for sources without a resolvable desktop entry.
+            const icon = source.icon?.to_string();
+            if (icon) {
+                const icons = this._settings.get_value('app-icons').deepUnpack();
+                if (icons[key] !== icon) {
+                    icons[key] = icon;
+                    this._settings.set_value('app-icons', new GLib.Variant('a{ss}', icons));
+                }
             }
         }
         const changed = () => this.emit('changed');

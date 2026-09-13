@@ -4,5 +4,6 @@
     <key name="default-route" type="s"><default>'notch'</default><choices><choice value="notch"/><choice value="native"/></choices><summary>Default notification presentation</summary></key>
     <key name="app-routes" type="a{ss}"><default>{}</default><summary>Presentation overrides by application</summary></key>
     <key name="known-apps" type="a{ss}"><default>{}</default><summary>Applications that have sent notifications</summary></key>
+    <key name="app-icons" type="a{ss}"><default>{}</default><summary>Serialized icon GNOME resolved for each application</summary></key>
   </schema>
 </schemalist>

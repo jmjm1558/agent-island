@@ -269,7 +269,18 @@ def run_tests(d):
     d.click_button('Ajustes')
     d.click_button('A Editor: Normal')
     d.check('app preference is saved', f'{i}._notifications.routeForId("source:A Editor")==="native"')
+    d.check('every listed app resolves an icon', f'{i}._notifications.applications.every(a => !!{i}._appIcon(a))')
+    rows = f'{i}._content.get_children().filter(a => a.has_style_class_name("agent-island-route-row")).length'
+    total = d.js(f'{i}._notifications.applications.length')
+    configured = d.js(f'{i}._notifications.applications.filter(a => a.configured).length')
+    d.check('long app list folds', f'{rows} === {1 + configured + min(5, total - configured)}')
+    d.check('a configured app is never folded away',
+        f'{i}._content.get_children().some(r => r.get_children().some(c => c.text === "A Editor"))')
     d.screenshot('notch-settings')
+    d.click_button(f'Ver {total - configured - 5} más')
+    d.check('the header toggle reveals every app', f'{rows} === {total + 1}')
+    d.click_button('Mostrar menos')
+    d.check('folding back restores the short list', f'{rows} === {1 + configured + min(5, total - configured)}')
     d.click(1100, 700)
     d.notify('Banner elegido', app='A Editor')
     time.sleep(.6)

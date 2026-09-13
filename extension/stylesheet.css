@@ -76,6 +76,8 @@
 .agent-island-chip-idle { color: #a1a1aa; background-color: #242428; }
 .agent-island-idle-toggle { padding: 8px; border-radius: 10px; font-size: 9pt; color: #92929d; }
 .agent-island-route-row { padding: 8px 2px; spacing: 5px; }
+.agent-island-route-icon { icon-size: 20px; margin-right: 4px; }
+.agent-island-route-header { spacing: 6px; }
 .agent-island-avatar-codex-desktop { background-color: transparent; }
 
 .agent-island-controls { spacing: 10px; }

@@ -20,6 +20,7 @@ const COLLAPSED_WIDTH = 248;
 const EXPANDED_WIDTH = 480;
 const MORPH_MS = 360;
 const PREVIEW_MS = 2500;
+const ROUTING_ROWS = 5;
 const STATE_LABEL = {working: 'Trabajando', waiting: 'Te necesita', idle: 'En pausa'};
 const AGENT_META = {
     'claude-code': {label: 'Claude Code', initial: 'C', icon: 'claude-code.svg'},
@@ -36,6 +37,7 @@ class Island extends PanelMenu.Button {
         this._notifications = notifications;
         this._assetsPath = GLib.build_filenamev([extensionPath, 'assets']);
         this._view = 'alerts';
+        this._allApps = false;
         this._expandedGroups = new Set();
         this._expanded = false;
         this._preview = null;
@@ -435,11 +437,38 @@ class Island extends PanelMenu.Button {
         this._content.add_child(toggle);
     }
 
+    // The app's own icon, from what GNOME resolved or from its desktop entry:
+    // no bundled third-party logos.
+    _appIcon(app) {
+        if (app.icon)
+            return Gio.Icon.new_for_string(app.icon);
+        const separator = app.id.indexOf(':');
+        const info = app.id.slice(0, separator) === 'app'
+            ? Shell.AppSystem.get_default().lookup_app(`${app.id.slice(separator + 1)}.desktop`)?.get_app_info()
+            : null;
+        return info?.get_icon() ?? new Gio.ThemedIcon({name: 'application-x-executable-symbolic'});
+    }
+
     _fillRoutingView() {
-        const note = this._label('Elige dónde aparecen los avisos de cada app.', 'agent-island-row-sub', true);
-        this._content.add_child(note);
-        const routeRow = (title, current, change) => {
+        const apps = this._notifications.applications;
+        const chosen = apps.filter(app => app.configured);
+        const rest = apps.filter(app => !app.configured);
+        const shown = this._allApps ? rest : rest.slice(0, ROUTING_ROWS);
+        const header = new St.BoxLayout({style_class: 'agent-island-route-header'});
+        header.add_child(this._label('Elige dónde aparecen los avisos de cada app.', 'agent-island-row-sub', true));
+        // The toggle rides with the note: at the end of a scrolling list it
+        // would sit below the fold, which is exactly where it is needed.
+        if (rest.length > ROUTING_ROWS) {
+            const toggle = new St.Button({style_class: 'agent-island-text-button', can_focus: true,
+                label: this._allApps ? 'Mostrar menos' : `Ver ${rest.length - shown.length} más`});
+            toggle.connect('clicked', () => { this._allApps = !this._allApps; this._queueSync(); });
+            header.add_child(toggle);
+        }
+        this._content.add_child(header);
+        const routeRow = (title, current, change, icon) => {
             const row = new St.BoxLayout({style_class: 'agent-island-route-row'});
+            row.add_child(new St.Icon({gicon: icon, fallback_icon_name: 'application-x-executable-symbolic',
+                style_class: 'agent-island-route-icon', y_align: Clutter.ActorAlign.CENTER}));
             row.add_child(this._label(title, 'agent-island-row-title'));
             for (const [route, label] of [['notch', 'Notch'], ['native', 'Normal']]) {
                 const button = new St.Button({label, can_focus: true, accessible_name: `${title}: ${label}`,
@@ -449,9 +478,10 @@ class Island extends PanelMenu.Button {
             }
             this._content.add_child(row);
         };
-        routeRow('Apps nuevas', this._notifications.defaultRoute, route => { this._notifications.defaultRoute = route; });
-        for (const app of this._notifications.applications)
-            routeRow(app.title, app.route, route => this._notifications.setRoute(app.id, route));
+        routeRow('Apps nuevas', this._notifications.defaultRoute,
+            route => { this._notifications.defaultRoute = route; }, new Gio.ThemedIcon({name: 'list-add-symbolic'}));
+        for (const app of [...chosen, ...shown])
+            routeRow(app.title, app.route, route => this._notifications.setRoute(app.id, route), this._appIcon(app));
         this._content.add_child(this._label('Las apps se añaden al enviar su primer aviso. No molestar se aplica a ambos destinos.', 'agent-island-row-sub', true));
     }
 
